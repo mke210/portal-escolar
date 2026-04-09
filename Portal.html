@@ -5,8 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Portal Escolar</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://www.gstatic.com/firebasejs/12.11.0/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/12.11.0/firebase-database-compat.js"></script>
 <style>
 :root{
   --bg:#f5f1e8; --card:#fff; --ink:#1a1a2e; --ink2:#4a4a5e; --muted:#8a8a9a;
@@ -308,36 +306,70 @@ function setConnState(state, label){
   });
 }
 
-function initFirebase(){
-  if(typeof firebase === 'undefined'){
-    // SDK not loaded yet — retry a few times
-    initFirebase.tries = (initFirebase.tries||0) + 1;
-    if(initFirebase.tries < 20){
-      setTimeout(initFirebase, 250);
-      return;
+// Load Firebase SDK with multiple CDN fallbacks
+function loadFirebaseSDK(){
+  return new Promise((resolve, reject) => {
+    if(typeof firebase !== 'undefined' && firebase.database){ resolve(); return; }
+    const cdns = [
+      'https://www.gstatic.com/firebasejs/12.11.0/',
+      'https://cdnjs.cloudflare.com/ajax/libs/firebase/12.3.0/',
+      'https://www.gstatic.com/firebasejs/10.14.1/',
+      'https://cdnjs.cloudflare.com/ajax/libs/firebase/10.14.1/'
+    ];
+    let idx = 0;
+    function tryNext(){
+      if(idx >= cdns.length){ reject(new Error('Todos los CDNs fallaron')); return; }
+      const base = cdns[idx++];
+      console.log('[Firebase] Intentando cargar desde', base);
+      setConnState('connecting', 'Cargando SDK…');
+      const s1 = document.createElement('script');
+      s1.src = base + 'firebase-app-compat.js';
+      s1.onload = () => {
+        const s2 = document.createElement('script');
+        s2.src = base + 'firebase-database-compat.js';
+        s2.onload = () => {
+          if(typeof firebase !== 'undefined' && firebase.database){
+            console.log('[Firebase] Cargado exitosamente desde', base);
+            resolve();
+          } else {
+            console.warn('[Firebase] Script cargó pero firebase no está definido en', base);
+            tryNext();
+          }
+        };
+        s2.onerror = () => { console.warn('[Firebase] Falló database-compat de', base); tryNext(); };
+        document.head.appendChild(s2);
+      };
+      s1.onerror = () => { console.warn('[Firebase] Falló app-compat de', base); tryNext(); };
+      document.head.appendChild(s1);
     }
-    console.error('Firebase SDK no se cargó. Verifica tu conexión o bloqueadores de scripts.');
-    setConnState('offline','SDK no cargado');
-    return;
-  }
-  try{
-    fbApp = firebase.initializeApp(firebaseConfig);
-    fbDb = firebase.database();
-    fbReady = true;
-    // Connection state listener
-    fbDb.ref('.info/connected').on('value', snap=>{
-      fbConnected = !!snap.val();
-      if(fbConnected){
-        setConnState('online','En línea');
-        subscribeFirebase();
-      } else {
-        setConnState('offline','Sin conexión');
-      }
-    });
-  }catch(err){
-    console.error('Firebase init error',err);
-    setConnState('offline','Error de conexión');
-  }
+    tryNext();
+  });
+}
+
+function initFirebase(){
+  setConnState('connecting', 'Cargando Firebase…');
+  loadFirebaseSDK().then(() => {
+    try{
+      fbApp = firebase.initializeApp(firebaseConfig);
+      fbDb = firebase.database();
+      fbReady = true;
+      fbDb.ref('.info/connected').on('value', snap=>{
+        fbConnected = !!snap.val();
+        if(fbConnected){
+          setConnState('online','En línea');
+          subscribeFirebase();
+        } else {
+          setConnState('offline','Sin conexión');
+        }
+      });
+    }catch(err){
+      console.error('Firebase init error',err);
+      setConnState('offline','Error: '+err.message);
+    }
+  }).catch(err => {
+    console.error('No se pudo cargar Firebase SDK desde ningún CDN:', err);
+    setConnState('offline','SDK no disponible (sin internet)');
+  });
 }
 
 function subscribeFirebase(){
