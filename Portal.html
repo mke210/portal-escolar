@@ -1,0 +1,1261 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Portal Escolar</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f5f1e8; --card:#fff; --ink:#1a1a2e; --ink2:#4a4a5e; --muted:#8a8a9a;
+  --line:#e8e2d3; --accent:#c94444; --accent2:#185FA5; --green:#2a7a4b; --orange:#d68a2a;
+  --red:#c8422a; --yellow:#f0c030; --soft:#faf7ee;
+}
+*{box-sizing:border-box;margin:0;padding:0;font-family:'DM Sans',system-ui,sans-serif}
+body{background:var(--bg);color:var(--ink);min-height:100vh;font-size:14px}
+h1,h2,h3,.serif{font-family:'DM Serif Display',serif;font-weight:400}
+button{cursor:pointer;font-family:inherit;border:none;background:none}
+input,select,textarea{font-family:inherit;font-size:14px}
+.hidden{display:none!important}
+
+/* ── LANDING ─────────────────────────────── */
+.landing{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:2rem 1rem;background:linear-gradient(135deg,#f5f1e8 0%,#ebe4d0 100%)}
+.landing-header{text-align:center;margin-bottom:3rem}
+.landing-header h1{font-size:3rem;color:var(--ink);margin-bottom:.5rem}
+.landing-header p{color:var(--ink2);font-size:1.1rem}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:1.5rem;max-width:960px;width:100%}
+.role-card{background:var(--card);border-radius:20px;padding:2.5rem 1.8rem;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.08);cursor:pointer;transition:all .25s;border:2px solid transparent}
+.role-card:hover{transform:translateY(-6px);box-shadow:0 18px 40px rgba(0,0,0,.12);border-color:var(--accent)}
+.role-card .icon{font-size:3.2rem;margin-bottom:1rem}
+.role-card h2{font-size:1.6rem;margin-bottom:.5rem}
+.role-card p{color:var(--muted);font-size:.95rem;margin-bottom:1.3rem;min-height:2.6em}
+.role-card .form-area{display:flex;flex-direction:column;gap:.6rem;margin-top:1rem}
+.role-card input{padding:10px 14px;border:1.5px solid var(--line);border-radius:10px;outline:none;text-align:center;background:var(--soft)}
+.role-card input:focus{border-color:var(--accent)}
+.role-card .btn-enter{background:var(--ink);color:#fff;padding:11px;border-radius:10px;font-weight:600;margin-top:.4rem;transition:background .2s}
+.role-card .btn-enter:hover{background:var(--accent)}
+.role-card .err{color:var(--red);font-size:.82rem;min-height:1em}
+
+/* ── APP SHELL ─────────────────────────────── */
+.app{min-height:100vh;display:flex;flex-direction:column}
+.topbar{background:var(--ink);color:#fff;padding:.8rem 1.5rem;display:flex;align-items:center;justify-content:space-between;box-shadow:0 2px 10px rgba(0,0,0,.1)}
+.topbar .brand{font-family:'DM Serif Display',serif;font-size:1.4rem;display:flex;align-items:center;gap:.6rem}
+.topbar .user{display:flex;align-items:center;gap:1rem;font-size:.9rem}
+.topbar .btn-logout{background:rgba(255,255,255,.1);color:#fff;padding:7px 14px;border-radius:8px;font-size:.82rem;transition:background .2s}
+.topbar .btn-logout:hover{background:var(--accent)}
+.tabs{background:var(--soft);border-bottom:1.5px solid var(--line);padding:0 1.5rem;display:flex;gap:.2rem;overflow-x:auto}
+.tab{padding:.85rem 1.2rem;color:var(--ink2);border-bottom:3px solid transparent;white-space:nowrap;font-weight:500;transition:all .2s;font-size:.9rem}
+.tab:hover{color:var(--ink)}
+.tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.content{flex:1;padding:1.8rem;max-width:1200px;margin:0 auto;width:100%}
+
+/* ── CARDS & FORMS ─────────────────────────────── */
+.panel{background:var(--card);border-radius:14px;padding:1.6rem;box-shadow:0 2px 12px rgba(0,0,0,.05);margin-bottom:1.2rem}
+.panel h3{font-family:'DM Sans',sans-serif;font-weight:600;font-size:1.05rem;margin-bottom:1rem;color:var(--ink);display:flex;align-items:center;gap:.5rem}
+.panel p.sub{color:var(--muted);font-size:.88rem;margin-bottom:1rem}
+.form-row{display:grid;grid-template-columns:1fr 1fr;gap:1rem;margin-bottom:1rem}
+.form-row.triple{grid-template-columns:1fr 1fr 1fr}
+.form-group{display:flex;flex-direction:column;gap:.35rem}
+.form-group label{font-size:.78rem;font-weight:600;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em}
+.form-group input,.form-group select,.form-group textarea{padding:10px 13px;border:1.5px solid var(--line);border-radius:9px;background:var(--soft);outline:none;transition:border .2s}
+.form-group input:focus,.form-group select:focus,.form-group textarea:focus{border-color:var(--accent2);background:#fff}
+.form-group textarea{resize:vertical;min-height:70px;font-family:inherit}
+.btn{display:inline-flex;align-items:center;gap:.4rem;padding:10px 18px;border-radius:9px;font-weight:600;font-size:.88rem;transition:all .2s;cursor:pointer;border:none}
+.btn-primary{background:var(--accent);color:#fff}
+.btn-primary:hover{background:#a33333}
+.btn-sec{background:var(--soft);color:var(--ink);border:1.5px solid var(--line)}
+.btn-sec:hover{background:var(--line)}
+.btn-green{background:var(--green);color:#fff}
+.btn-green:hover{background:#1e5a37}
+.btn-blue{background:var(--accent2);color:#fff}
+.btn-blue:hover{background:#0f4680}
+.btn-danger{background:#fff0f0;color:var(--red);border:1.5px solid #f5c6cb}
+.btn-danger:hover{background:#ffd6d6}
+.btn-small{padding:6px 12px;font-size:.78rem;border-radius:7px}
+.btn-row{display:flex;gap:.6rem;flex-wrap:wrap;margin-top:1rem}
+
+/* ── LISTS ─────────────────────────────── */
+.item-list{display:flex;flex-direction:column;gap:.6rem}
+.item{background:var(--soft);border:1.5px solid var(--line);border-radius:11px;padding:1rem 1.1rem;display:flex;align-items:center;gap:1rem;transition:all .2s}
+.item:hover{border-color:var(--accent2);background:#fff}
+.item .i-icon{font-size:1.6rem;flex-shrink:0}
+.item .i-body{flex:1;min-width:0}
+.item .i-title{font-weight:600;color:var(--ink);margin-bottom:.15rem;word-break:break-word}
+.item .i-meta{font-size:.78rem;color:var(--muted);display:flex;gap:.7rem;flex-wrap:wrap}
+.item .i-meta span{display:inline-flex;align-items:center;gap:.25rem}
+.item .i-actions{display:flex;gap:.4rem;flex-wrap:wrap}
+.pill{display:inline-flex;align-items:center;gap:.25rem;padding:2px 9px;border-radius:100px;font-size:.72rem;font-weight:600}
+.pill-on{background:#d8f0df;color:var(--green)}
+.pill-off{background:#f0e2d8;color:#8a6030}
+.pill-grado{background:#e0ecff;color:var(--accent2)}
+.pill-grupo{background:#ffe8d8;color:var(--orange)}
+
+/* ── TOGGLE SWITCH ─────────────────────────────── */
+.switch{position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0}
+.switch input{opacity:0;width:0;height:0}
+.slider{position:absolute;cursor:pointer;inset:0;background:#ccc;border-radius:24px;transition:.3s}
+.slider:before{position:absolute;content:"";height:18px;width:18px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.3s}
+.switch input:checked+.slider{background:var(--green)}
+.switch input:checked+.slider:before{transform:translateX(20px)}
+
+/* ── EMPTY STATE ─────────────────────────────── */
+.empty{text-align:center;padding:3rem 1.5rem;color:var(--muted)}
+.empty .big{font-size:3rem;margin-bottom:.8rem}
+.empty p{font-size:.95rem}
+
+/* ── TOAST ─────────────────────────────── */
+.toast{position:fixed;top:20px;right:20px;background:var(--ink);color:#fff;padding:13px 20px;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.2);z-index:9999;animation:slidein .3s ease-out;font-size:.9rem;max-width:320px}
+.toast.success{background:var(--green)}
+.toast.error{background:var(--red)}
+@keyframes slidein{from{transform:translateX(400px);opacity:0}to{transform:translateX(0);opacity:1}}
+
+/* ── MODAL ─────────────────────────────── */
+.modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center;z-index:1000;padding:1rem}
+.modal{background:#fff;border-radius:14px;max-width:600px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 20px 50px rgba(0,0,0,.3)}
+.modal-head{padding:1.2rem 1.5rem;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}
+.modal-head h3{font-family:'DM Sans',sans-serif;font-weight:600;font-size:1.1rem}
+.modal-body{padding:1.5rem}
+.modal-close{font-size:1.6rem;color:var(--muted);cursor:pointer;padding:0 .4rem;line-height:1}
+.modal-close:hover{color:var(--red)}
+
+/* ── GRADES TABLE (PARENT/STUDENT VIEW) ─────────────────────────────── */
+.grades-wrap{overflow-x:auto;background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.05);margin-bottom:1.2rem}
+.grades-table{width:100%;border-collapse:collapse;min-width:600px}
+.grades-table th{background:var(--ink);color:#fff;padding:.85rem .6rem;text-align:left;font-weight:600;font-size:.8rem;text-transform:uppercase;letter-spacing:.03em}
+.grades-table th.num{text-align:center;writing-mode:vertical-rl;transform:rotate(180deg);font-size:.73rem;padding:.7rem .35rem;min-width:34px;max-width:38px}
+.grades-table th.final{background:var(--green);text-align:center;writing-mode:vertical-rl;transform:rotate(180deg)}
+.grades-table td{padding:.8rem .6rem;border-bottom:1px solid var(--line);font-size:.88rem}
+.grades-table td.num{text-align:center;font-weight:500}
+.grades-table td.final{text-align:center;font-weight:700;background:#f2fbf5}
+.grades-table .final-chip{display:inline-block;background:#d8f0df;color:var(--green);padding:4px 12px;border-radius:100px;font-weight:700}
+.grades-table .low{background:#ffeaea;color:var(--red)}
+
+/* ── STATS ─────────────────────────────── */
+.stats-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;margin-bottom:1.2rem}
+.stat{background:var(--card);border-radius:12px;padding:1.2rem;box-shadow:0 2px 10px rgba(0,0,0,.05);border-left:4px solid var(--accent2)}
+.stat.green{border-left-color:var(--green)}
+.stat.orange{border-left-color:var(--orange)}
+.stat.red{border-left-color:var(--red)}
+.stat .label{font-size:.75rem;color:var(--muted);text-transform:uppercase;font-weight:600;letter-spacing:.04em;margin-bottom:.3rem}
+.stat .value{font-size:1.9rem;font-weight:700;color:var(--ink);line-height:1.1}
+.stat .sub{font-size:.8rem;color:var(--muted);margin-top:.2rem}
+
+/* ── STUDENT DASHBOARD MATERIAL CARDS ─────────────────────────────── */
+.mat-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:1rem}
+.mat-card{background:#fff;border-radius:12px;padding:1.3rem;box-shadow:0 2px 12px rgba(0,0,0,.05);transition:all .25s;border:2px solid transparent;cursor:pointer}
+.mat-card:hover{transform:translateY(-3px);box-shadow:0 8px 22px rgba(0,0,0,.1);border-color:var(--accent)}
+.mat-card .m-icon{font-size:2.4rem;margin-bottom:.6rem}
+.mat-card h4{font-size:1.02rem;margin-bottom:.3rem;color:var(--ink);font-family:'DM Sans',sans-serif;font-weight:600}
+.mat-card .m-desc{font-size:.82rem;color:var(--muted);margin-bottom:.8rem;min-height:2.4em}
+.mat-card .m-type{display:inline-block;background:var(--soft);color:var(--ink2);padding:3px 10px;border-radius:100px;font-size:.72rem;font-weight:600}
+
+/* ── EXAM ─────────────────────────────── */
+.exam-q{background:var(--soft);border:1.5px solid var(--line);border-radius:11px;padding:1.2rem;margin-bottom:1rem}
+.exam-q h4{font-weight:600;margin-bottom:.8rem;color:var(--ink);font-family:'DM Sans',sans-serif;font-size:.98rem}
+.exam-opts{display:flex;flex-direction:column;gap:.5rem}
+.exam-opt{display:flex;align-items:center;gap:.7rem;padding:10px 14px;background:#fff;border:1.5px solid var(--line);border-radius:9px;cursor:pointer;transition:all .2s}
+.exam-opt:hover{border-color:var(--accent2)}
+.exam-opt.selected{border-color:var(--accent2);background:#e7f0fc}
+.exam-opt input[type=radio]{accent-color:var(--accent2)}
+.exam-opt.correct{border-color:var(--green);background:#d8f0df}
+.exam-opt.wrong{border-color:var(--red);background:#ffeaea}
+
+@media(max-width:640px){
+  .form-row,.form-row.triple{grid-template-columns:1fr}
+  .content{padding:1rem}
+  .landing-header h1{font-size:2.2rem}
+  .role-card{padding:2rem 1.4rem}
+  .topbar{padding:.7rem 1rem}
+  .topbar .brand{font-size:1.1rem}
+  .tabs{padding:0 .8rem}
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════════════ LANDING ═══════════════════ -->
+<div id="landing" class="landing">
+  <div class="landing-header">
+    <h1>Portal Escolar</h1>
+    <p>Acceso para maestros, alumnos y padres de familia</p>
+  </div>
+  <div class="cards">
+    <!-- MAESTRO -->
+    <div class="role-card">
+      <div class="icon">👨‍🏫</div>
+      <h2>Maestro</h2>
+      <p>Administra materiales, exámenes y calificaciones</p>
+      <div class="form-area">
+        <input type="text" id="tUser" placeholder="Usuario" autocomplete="off">
+        <input type="password" id="tPass" placeholder="Contraseña">
+        <button class="btn-enter" onclick="loginTeacher()">Ingresar</button>
+        <div class="err" id="tErr"></div>
+      </div>
+    </div>
+    <!-- ALUMNO -->
+    <div class="role-card">
+      <div class="icon">🎒</div>
+      <h2>Alumno</h2>
+      <p>Consulta materiales y contesta exámenes</p>
+      <div class="form-area">
+        <input type="text" id="sCode" placeholder="Tu código" autocomplete="off">
+        <button class="btn-enter" onclick="loginStudent()">Entrar</button>
+        <div class="err" id="sErr"></div>
+      </div>
+    </div>
+    <!-- PADRE -->
+    <div class="role-card">
+      <div class="icon">👪</div>
+      <h2>Padre de familia</h2>
+      <p>Consulta el avance académico de tu hijo</p>
+      <div class="form-area">
+        <input type="text" id="pCode" placeholder="Código de tu hijo" autocomplete="off">
+        <button class="btn-enter" onclick="loginParent()">Entrar</button>
+        <div class="err" id="pErr"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════ APP SHELL ═══════════════════ -->
+<div id="app" class="app hidden">
+  <div class="topbar">
+    <div class="brand"><span id="brandIcon">📚</span><span id="brandText">Portal Escolar</span></div>
+    <div class="user">
+      <span id="userLabel"></span>
+      <button class="btn-logout" onclick="logout()">Salir</button>
+    </div>
+  </div>
+  <div class="tabs" id="tabs"></div>
+  <div class="content" id="content"></div>
+</div>
+
+<div id="modalHolder"></div>
+<div id="toastHolder"></div>
+
+<script>
+/* ═══════════════════════════════════════════════════════════
+   PORTAL ESCOLAR
+   Complementa el Registro de Calificaciones del maestro.
+   Datos del portal: localStorage 'portal_v1'
+   Datos del registro (importados): dentro de portal.calif
+═══════════════════════════════════════════════════════════ */
+
+const STORE_KEY = 'portal_v1';
+const TEACHER_USER = 'admin';
+const TEACHER_PASS = '182136';
+
+// ── State ─────────────────────────────────────
+let portal = {
+  materials: [],      // [{id,type,title,desc,grado,grupo,content,createdAt,visible}]
+  exams: [],          // [{id,title,desc,grado,grupo,questions:[{q,opts:[],correct}],visible}]
+  calif: null,        // imported JSON from Registro (contains .groups)
+  examResults: []     // [{studentCode,studentName,examId,score,total,date}]
+};
+let session = null;   // {role,label} | null
+
+function saveStore(){ localStorage.setItem(STORE_KEY, JSON.stringify(portal)); }
+function loadStore(){
+  try{
+    const raw = localStorage.getItem(STORE_KEY);
+    if(raw){
+      const p = JSON.parse(raw);
+      portal = {...portal, ...p};
+      if(!portal.materials) portal.materials = [];
+      if(!portal.exams) portal.exams = [];
+      if(!portal.examResults) portal.examResults = [];
+    }
+  }catch(e){console.error(e)}
+}
+loadStore();
+
+// ── Utils ─────────────────────────────────────
+function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
+function escHtml(s){ return String(s||'').replace(/[&<>"']/g, m=>({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+function toast(msg, type='success'){
+  const h = document.getElementById('toastHolder');
+  const t = document.createElement('div');
+  t.className = 'toast '+type; t.textContent = msg;
+  h.appendChild(t);
+  setTimeout(()=>{ t.style.transition='opacity .3s'; t.style.opacity='0'; setTimeout(()=>t.remove(),300); }, 2600);
+}
+function openModal(html){
+  const h = document.getElementById('modalHolder');
+  h.innerHTML = `<div class="modal-bg" onclick="if(event.target===this)closeModal()"><div class="modal">${html}</div></div>`;
+}
+function closeModal(){ document.getElementById('modalHolder').innerHTML=''; }
+
+// ── Grado/Grupo parsing from imported Registro groups ─────────
+// Registro groups have g.grado ('1','2','3') and g.name like "3°A Matemáticas"
+function parseGrupoLetter(name){
+  if(!name) return '';
+  const m = name.match(/[1-3]°?\s*([A-Fa-f])/);
+  return m ? m[1].toUpperCase() : '';
+}
+function gradoLabel(g){ return g==='1'?'1°':g==='2'?'2°':g==='3'?'3°':'—'; }
+function grupoLabel(g){ return g ? g.toUpperCase() : '—'; }
+
+// ── LOGIN ─────────────────────────────────────
+function loginTeacher(){
+  const u = document.getElementById('tUser').value.trim();
+  const p = document.getElementById('tPass').value;
+  if(u === TEACHER_USER && p === TEACHER_PASS){
+    session = {role:'teacher', label:'Maestro admin'};
+    showApp();
+  } else {
+    document.getElementById('tErr').textContent = 'Usuario o contraseña incorrectos';
+  }
+}
+
+function findStudentByCode(code){
+  if(!portal.calif || !portal.calif.groups) return null;
+  code = (code||'').trim();
+  if(!code) return null;
+  // Search across all groups; return first match with metadata
+  for(const g of portal.calif.groups){
+    if(!g.students) continue;
+    for(const s of g.students){
+      if(s.qrCode && s.qrCode.trim() === code){
+        return { student:s, group:g };
+      }
+    }
+  }
+  return null;
+}
+
+function loginStudent(){
+  const code = document.getElementById('sCode').value.trim();
+  if(!portal.calif){ document.getElementById('sErr').textContent = 'El maestro aún no ha cargado datos'; return; }
+  const match = findStudentByCode(code);
+  if(!match){ document.getElementById('sErr').textContent = 'Código no encontrado'; return; }
+  session = { role:'student', code, label:match.student.name,
+              grado:match.group.grado||'', grupo:parseGrupoLetter(match.group.name), studentId:match.student.id };
+  showApp();
+}
+
+function loginParent(){
+  const code = document.getElementById('pCode').value.trim();
+  if(!portal.calif){ document.getElementById('pErr').textContent = 'El maestro aún no ha cargado datos'; return; }
+  const match = findStudentByCode(code);
+  if(!match){ document.getElementById('pErr').textContent = 'Código no encontrado'; return; }
+  session = { role:'parent', code, label:'Padre de '+match.student.name,
+              studentName:match.student.name, studentId:match.student.id };
+  showApp();
+}
+
+function logout(){
+  session = null;
+  document.getElementById('app').classList.add('hidden');
+  document.getElementById('landing').classList.remove('hidden');
+  ['tUser','tPass','sCode','pCode'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
+  ['tErr','sErr','pErr'].forEach(id=>{ const e=document.getElementById(id); if(e) e.textContent=''; });
+}
+
+function showApp(){
+  document.getElementById('landing').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  document.getElementById('userLabel').textContent = session.label;
+  if(session.role==='teacher'){
+    document.getElementById('brandIcon').textContent = '👨‍🏫';
+    document.getElementById('brandText').textContent = 'Panel del Maestro';
+    renderTeacherTabs();
+  } else if(session.role==='student'){
+    document.getElementById('brandIcon').textContent = '🎒';
+    document.getElementById('brandText').textContent = 'Mi aula';
+    renderStudentTabs();
+  } else {
+    document.getElementById('brandIcon').textContent = '👪';
+    document.getElementById('brandText').textContent = 'Portal Padres';
+    renderParentTabs();
+  }
+}
+
+/* ═══════════════════════════════════════════
+   TEACHER AREA
+═══════════════════════════════════════════ */
+let teacherTab = 'calif';
+
+function renderTeacherTabs(){
+  const tabs = [
+    {id:'calif', label:'📊 Calificaciones'},
+    {id:'materials', label:'📁 Materiales'},
+    {id:'exams', label:'📝 Exámenes'},
+    {id:'visibility', label:'👁️ Visibilidad'},
+    {id:'io', label:'💾 Importar / Exportar'}
+  ];
+  const tabsEl = document.getElementById('tabs');
+  tabsEl.innerHTML = tabs.map(t=>`<button class="tab ${teacherTab===t.id?'active':''}" onclick="setTeacherTab('${t.id}')">${t.label}</button>`).join('');
+  renderTeacherContent();
+}
+function setTeacherTab(id){ teacherTab=id; renderTeacherTabs(); }
+
+function renderTeacherContent(){
+  const c = document.getElementById('content');
+  if(teacherTab==='calif') c.innerHTML = viewCalif();
+  else if(teacherTab==='materials') c.innerHTML = viewMaterials();
+  else if(teacherTab==='exams') c.innerHTML = viewExams();
+  else if(teacherTab==='visibility') c.innerHTML = viewVisibility();
+  else if(teacherTab==='io') c.innerHTML = viewIO();
+}
+
+// ── CALIFICACIONES: Import JSON from Registro ──
+function viewCalif(){
+  const hasCalif = portal.calif && portal.calif.groups;
+  let stats = '';
+  if(hasCalif){
+    const nG = portal.calif.groups.length;
+    const nS = new Set();
+    portal.calif.groups.forEach(g=>(g.students||[]).forEach(s=>nS.add(s.name)));
+    const withCode = new Set();
+    portal.calif.groups.forEach(g=>(g.students||[]).forEach(s=>{ if(s.qrCode) withCode.add(s.name); }));
+    stats = `
+      <div class="stats-grid">
+        <div class="stat"><div class="label">Grupos</div><div class="value">${nG}</div><div class="sub">importados</div></div>
+        <div class="stat green"><div class="label">Alumnos únicos</div><div class="value">${nS.size}</div></div>
+        <div class="stat orange"><div class="label">Con código</div><div class="value">${withCode.size}</div><div class="sub">de ${nS.size}</div></div>
+      </div>`;
+  }
+  return `
+    <div class="panel">
+      <h3>📊 Vincular con Registro de Calificaciones</h3>
+      <p class="sub">Importa el archivo JSON exportado desde tu Registro de Calificaciones. Esto sincroniza alumnos, calificaciones, conducta y entregas para que los padres y alumnos puedan consultarlos.</p>
+      <input type="file" id="califFile" accept=".json" style="display:none" onchange="importCalif(event)">
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="document.getElementById('califFile').click()">📥 Importar JSON de Registro</button>
+        <button class="btn btn-green" onclick="syncFromBrowser()">🔄 Sincronizar desde este navegador</button>
+        ${hasCalif?'<button class="btn btn-danger" onclick="clearCalif()">🗑️ Borrar datos importados</button>':''}
+      </div>
+      <p class="sub" style="margin-top:.8rem;margin-bottom:0;font-size:.8rem">💡 <strong>Sincronizar desde este navegador</strong> lee directamente los datos del Registro si ambos archivos (Index.html y Portal.html) están abiertos en el mismo servidor o carpeta hospedada. Úsalo para refrescar al instante cuando cambies algo en el Registro.</p>
+    </div>
+    ${stats}
+    ${hasCalif?renderCalifGroupList():`<div class="empty"><div class="big">📊</div><p>Aún no has importado calificaciones.<br>Usa el botón de arriba para cargar el JSON.</p></div>`}
+  `;
+}
+function renderCalifGroupList(){
+  const groups = portal.calif.groups || [];
+  return `<div class="panel"><h3>Grupos importados</h3><div class="item-list">${
+    groups.map(g=>{
+      const grado = gradoLabel(g.grado);
+      const grupo = grupoLabel(parseGrupoLetter(g.name));
+      const trim = g.trimestre ? `Trimestre ${g.trimestre}` : '';
+      const n = (g.students||[]).length;
+      const nAct = (g.activities||[]).length;
+      return `<div class="item"><div class="i-icon">📚</div><div class="i-body">
+        <div class="i-title">${escHtml(g.name)}</div>
+        <div class="i-meta">
+          <span class="pill pill-grado">${grado} ${grupo}</span>
+          ${trim?`<span>📅 ${trim}</span>`:''}
+          <span>👥 ${n} alumnos</span>
+          <span>📝 ${nAct} actividades</span>
+        </div>
+      </div></div>`;
+    }).join('')
+  }</div></div>`;
+}
+function importCalif(e){
+  const f = e.target.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = ev => {
+    try{
+      const data = JSON.parse(ev.target.result);
+      // Accept both formats: raw {groups:[]} or wrapped
+      let groups = null;
+      if(Array.isArray(data.groups)) groups = data.groups;
+      else if(data.regCalif_v3 && Array.isArray(data.regCalif_v3.groups)) groups = data.regCalif_v3.groups;
+      if(!groups){ toast('El archivo no contiene grupos reconocibles','error'); return; }
+      portal.calif = { groups, importedAt: new Date().toISOString() };
+      saveStore(); renderTeacherContent();
+      toast(`Importados ${groups.length} grupos ✓`,'success');
+    }catch(err){ toast('Archivo JSON inválido','error'); }
+  };
+  r.readAsText(f);
+  e.target.value = '';
+}
+function syncFromBrowser(){
+  try{
+    const raw = localStorage.getItem('regCalif_v3');
+    if(!raw){ toast('No se encontraron datos del Registro en este navegador. Abre Index.html en esta misma pestaña/origen, o usa Importar JSON.','error'); return; }
+    const data = JSON.parse(raw);
+    if(!data.groups || !Array.isArray(data.groups)){ toast('Los datos del navegador no son válidos','error'); return; }
+    portal.calif = { groups: data.groups, importedAt: new Date().toISOString() };
+    saveStore(); renderTeacherContent();
+    toast(`Sincronizado: ${data.groups.length} grupos ✓`,'success');
+  }catch(err){ toast('Error al leer datos del navegador','error'); }
+}
+function clearCalif(){
+  if(!confirm('¿Borrar los datos de calificaciones importados?')) return;
+  portal.calif = null; saveStore(); renderTeacherContent();
+  toast('Datos borrados','success');
+}
+
+// ── MATERIALES ──
+function viewMaterials(){
+  return `
+    <div class="panel">
+      <h3>📁 Subir Material</h3>
+      <p class="sub">Carga enlaces, documentos, imágenes y juegos HTML para compartir con los alumnos.</p>
+      <div class="form-row triple">
+        <div class="form-group">
+          <label>Tipo</label>
+          <select id="mType" onchange="matTypeChanged()">
+            <option value="link">🔗 Enlace web</option>
+            <option value="doc">📄 Documento (Word/Excel/PPT/PDF)</option>
+            <option value="image">🖼️ Imagen</option>
+            <option value="game">🎮 Juego HTML</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Grado</label>
+          <select id="mGrado">
+            <option value="all">Todos</option>
+            <option value="1">1°</option>
+            <option value="2">2°</option>
+            <option value="3">3°</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Grupo</label>
+          <select id="mGrupo">
+            <option value="all">Todos</option>
+            <option value="A">A</option><option value="B">B</option><option value="C">C</option>
+            <option value="D">D</option><option value="E">E</option><option value="F">F</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Título</label>
+          <input type="text" id="mTitle" placeholder="Nombre del material">
+        </div>
+        <div class="form-group">
+          <label>Descripción (opcional)</label>
+          <input type="text" id="mDesc" placeholder="Breve descripción">
+        </div>
+      </div>
+      <div id="mTypeFields">${matTypeFields('link')}</div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="saveMaterial()">💾 Guardar material</button>
+      </div>
+    </div>
+    ${renderMaterialList(true)}
+  `;
+}
+function matTypeFields(type){
+  if(type==='link') return `
+    <div class="form-group"><label>URL</label>
+      <input type="url" id="mUrl" placeholder="https://ejemplo.com"></div>`;
+  if(type==='doc') return `
+    <div class="form-group"><label>Archivo (Word, Excel, PowerPoint, PDF)</label>
+      <input type="file" id="mFile" accept=".doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf"></div>`;
+  if(type==='image') return `
+    <div class="form-group"><label>Imagen</label>
+      <input type="file" id="mFile" accept="image/*"></div>`;
+  if(type==='game') return `
+    <div class="form-group"><label>Archivo HTML del juego</label>
+      <input type="file" id="mFile" accept=".html,.htm"></div>
+    <div class="form-group"><label>O pega el código HTML aquí</label>
+      <textarea id="mHtmlCode" placeholder="<html>...</html>"></textarea></div>`;
+}
+function matTypeChanged(){
+  const t = document.getElementById('mType').value;
+  document.getElementById('mTypeFields').innerHTML = matTypeFields(t);
+}
+function fileToBase64(file){
+  return new Promise((res,rej)=>{
+    const r = new FileReader();
+    r.onload = ()=>res(r.result);
+    r.onerror = ()=>rej(r.error);
+    r.readAsDataURL(file);
+  });
+}
+function fileToText(file){
+  return new Promise((res,rej)=>{
+    const r = new FileReader();
+    r.onload = ()=>res(r.result);
+    r.onerror = ()=>rej(r.error);
+    r.readAsText(file);
+  });
+}
+async function saveMaterial(){
+  const type = document.getElementById('mType').value;
+  const title = document.getElementById('mTitle').value.trim();
+  const desc = document.getElementById('mDesc').value.trim();
+  const grado = document.getElementById('mGrado').value;
+  const grupo = document.getElementById('mGrupo').value;
+  if(!title){ toast('Ingresa un título','error'); return; }
+  let content = null, filename = '';
+  try{
+    if(type==='link'){
+      const url = document.getElementById('mUrl').value.trim();
+      if(!url){ toast('Ingresa la URL','error'); return; }
+      content = url;
+    } else if(type==='doc' || type==='image'){
+      const file = document.getElementById('mFile').files[0];
+      if(!file){ toast('Selecciona un archivo','error'); return; }
+      if(file.size > 8*1024*1024){ toast('Archivo muy grande (máx 8 MB)','error'); return; }
+      content = await fileToBase64(file);
+      filename = file.name;
+    } else if(type==='game'){
+      const file = document.getElementById('mFile').files[0];
+      const code = document.getElementById('mHtmlCode').value.trim();
+      if(file){
+        if(file.size > 4*1024*1024){ toast('HTML muy grande (máx 4 MB)','error'); return; }
+        content = await fileToText(file);
+        filename = file.name;
+      } else if(code){
+        content = code;
+      } else { toast('Carga un archivo HTML o pega el código','error'); return; }
+    }
+  }catch(err){ toast('Error al leer el archivo','error'); return; }
+  portal.materials.push({
+    id: uid(), type, title, desc, grado, grupo, content, filename,
+    createdAt: new Date().toISOString(), visible: true
+  });
+  saveStore(); renderTeacherContent();
+  toast('Material guardado ✓','success');
+}
+function renderMaterialList(withActions){
+  if(!portal.materials.length) return `<div class="empty"><div class="big">📁</div><p>Aún no hay materiales.</p></div>`;
+  const icons = {link:'🔗',doc:'📄',image:'🖼️',game:'🎮'};
+  const typeLabels = {link:'Enlace',doc:'Documento',image:'Imagen',game:'Juego HTML'};
+  return `<div class="panel"><h3>Materiales cargados (${portal.materials.length})</h3><div class="item-list">${
+    portal.materials.map(m=>`
+      <div class="item">
+        <div class="i-icon">${icons[m.type]||'📎'}</div>
+        <div class="i-body">
+          <div class="i-title">${escHtml(m.title)}</div>
+          ${m.desc?`<div style="font-size:.83rem;color:var(--ink2);margin:.15rem 0">${escHtml(m.desc)}</div>`:''}
+          <div class="i-meta">
+            <span>${typeLabels[m.type]}</span>
+            <span class="pill pill-grado">${m.grado==='all'?'Todos los grados':gradoLabel(m.grado)}</span>
+            <span class="pill pill-grupo">${m.grupo==='all'?'Todos los grupos':'Grupo '+m.grupo}</span>
+            <span class="pill ${m.visible?'pill-on':'pill-off'}">${m.visible?'● Visible':'○ Oculto'}</span>
+          </div>
+        </div>
+        ${withActions?`<div class="i-actions">
+          <label class="switch" title="Mostrar/Ocultar"><input type="checkbox" ${m.visible?'checked':''} onchange="toggleMat('${m.id}')"><span class="slider"></span></label>
+          <button class="btn btn-danger btn-small" onclick="delMat('${m.id}')">Eliminar</button>
+        </div>`:''}
+      </div>
+    `).join('')
+  }</div></div>`;
+}
+function toggleMat(id){
+  const m = portal.materials.find(x=>x.id===id);
+  if(m){ m.visible=!m.visible; saveStore(); renderTeacherContent(); }
+}
+function delMat(id){
+  if(!confirm('¿Eliminar este material?')) return;
+  portal.materials = portal.materials.filter(m=>m.id!==id);
+  saveStore(); renderTeacherContent();
+  toast('Material eliminado','success');
+}
+
+// ── EXÁMENES ──
+let examDraft = { title:'', desc:'', grado:'all', grupo:'all', questions:[] };
+
+function viewExams(){
+  return `
+    <div class="panel">
+      <h3>📝 Crear Examen</h3>
+      <div class="form-row">
+        <div class="form-group"><label>Título</label>
+          <input type="text" id="exTitle" value="${escHtml(examDraft.title)}" oninput="examDraft.title=this.value" placeholder="Ej: Evaluación trimestre 1"></div>
+        <div class="form-group"><label>Descripción</label>
+          <input type="text" id="exDesc" value="${escHtml(examDraft.desc)}" oninput="examDraft.desc=this.value"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Grado</label>
+          <select id="exGrado" onchange="examDraft.grado=this.value">
+            <option value="all" ${examDraft.grado==='all'?'selected':''}>Todos</option>
+            <option value="1" ${examDraft.grado==='1'?'selected':''}>1°</option>
+            <option value="2" ${examDraft.grado==='2'?'selected':''}>2°</option>
+            <option value="3" ${examDraft.grado==='3'?'selected':''}>3°</option>
+          </select></div>
+        <div class="form-group"><label>Grupo</label>
+          <select id="exGrupo" onchange="examDraft.grupo=this.value">
+            <option value="all" ${examDraft.grupo==='all'?'selected':''}>Todos</option>
+            ${['A','B','C','D','E','F'].map(g=>`<option value="${g}" ${examDraft.grupo===g?'selected':''}>${g}</option>`).join('')}
+          </select></div>
+      </div>
+      <div id="questionsList">${renderQuestionsDraft()}</div>
+      <div class="btn-row">
+        <button class="btn btn-sec" onclick="addQuestion()">➕ Agregar pregunta</button>
+        <button class="btn btn-primary" onclick="saveExam()">💾 Guardar examen</button>
+        <button class="btn btn-danger" onclick="resetExamDraft()">Cancelar</button>
+      </div>
+    </div>
+    ${renderExamList()}
+  `;
+}
+function renderQuestionsDraft(){
+  if(!examDraft.questions.length) return `<p style="color:var(--muted);text-align:center;padding:1rem">Añade preguntas para empezar</p>`;
+  return examDraft.questions.map((q,i)=>`
+    <div class="exam-q">
+      <div style="display:flex;justify-content:space-between;align-items:start;gap:1rem;margin-bottom:.6rem">
+        <strong>Pregunta ${i+1}</strong>
+        <button class="btn btn-danger btn-small" onclick="delQuestion(${i})">Eliminar</button>
+      </div>
+      <div class="form-group" style="margin-bottom:.7rem">
+        <input type="text" value="${escHtml(q.q)}" oninput="examDraft.questions[${i}].q=this.value" placeholder="Texto de la pregunta">
+      </div>
+      ${q.opts.map((o,j)=>`
+        <div style="display:flex;gap:.5rem;align-items:center;margin-bottom:.4rem">
+          <input type="radio" name="correct_${i}" ${q.correct===j?'checked':''} onchange="examDraft.questions[${i}].correct=${j}" title="Marcar como correcta">
+          <input type="text" style="flex:1;padding:8px 12px;border:1.5px solid var(--line);border-radius:7px;background:#fff" value="${escHtml(o)}" oninput="examDraft.questions[${i}].opts[${j}]=this.value" placeholder="Opción ${j+1}">
+          ${q.opts.length>2?`<button class="btn btn-danger btn-small" onclick="delOpt(${i},${j})">✕</button>`:''}
+        </div>
+      `).join('')}
+      <button class="btn btn-sec btn-small" style="margin-top:.4rem" onclick="addOpt(${i})">➕ Opción</button>
+    </div>
+  `).join('');
+}
+function addQuestion(){
+  examDraft.questions.push({q:'',opts:['',''],correct:0});
+  document.getElementById('questionsList').innerHTML = renderQuestionsDraft();
+}
+function delQuestion(i){
+  examDraft.questions.splice(i,1);
+  document.getElementById('questionsList').innerHTML = renderQuestionsDraft();
+}
+function addOpt(i){
+  examDraft.questions[i].opts.push('');
+  document.getElementById('questionsList').innerHTML = renderQuestionsDraft();
+}
+function delOpt(i,j){
+  const q = examDraft.questions[i];
+  q.opts.splice(j,1);
+  if(q.correct>=q.opts.length) q.correct = 0;
+  document.getElementById('questionsList').innerHTML = renderQuestionsDraft();
+}
+function saveExam(){
+  if(!examDraft.title.trim()){ toast('Ingresa un título','error'); return; }
+  if(!examDraft.questions.length){ toast('Agrega al menos una pregunta','error'); return; }
+  for(const q of examDraft.questions){
+    if(!q.q.trim()){ toast('Hay una pregunta vacía','error'); return; }
+    if(q.opts.some(o=>!o.trim())){ toast('Hay opciones vacías','error'); return; }
+  }
+  portal.exams.push({
+    id: uid(), title:examDraft.title.trim(), desc:examDraft.desc.trim(),
+    grado:examDraft.grado, grupo:examDraft.grupo,
+    questions: JSON.parse(JSON.stringify(examDraft.questions)),
+    createdAt: new Date().toISOString(), visible: true
+  });
+  saveStore();
+  resetExamDraft();
+  renderTeacherContent();
+  toast('Examen guardado ✓','success');
+}
+function resetExamDraft(){
+  examDraft = { title:'', desc:'', grado:'all', grupo:'all', questions:[] };
+  if(teacherTab==='exams') renderTeacherContent();
+}
+function renderExamList(){
+  if(!portal.exams.length) return '';
+  return `<div class="panel"><h3>Exámenes creados (${portal.exams.length})</h3><div class="item-list">${
+    portal.exams.map(e=>{
+      const nResults = portal.examResults.filter(r=>r.examId===e.id).length;
+      return `<div class="item">
+        <div class="i-icon">📝</div>
+        <div class="i-body">
+          <div class="i-title">${escHtml(e.title)}</div>
+          ${e.desc?`<div style="font-size:.83rem;color:var(--ink2);margin:.15rem 0">${escHtml(e.desc)}</div>`:''}
+          <div class="i-meta">
+            <span>${e.questions.length} preguntas</span>
+            <span class="pill pill-grado">${e.grado==='all'?'Todos':gradoLabel(e.grado)}</span>
+            <span class="pill pill-grupo">${e.grupo==='all'?'Todos':'Grupo '+e.grupo}</span>
+            <span class="pill ${e.visible?'pill-on':'pill-off'}">${e.visible?'● Visible':'○ Oculto'}</span>
+            <span>📊 ${nResults} resultados</span>
+          </div>
+        </div>
+        <div class="i-actions">
+          <label class="switch"><input type="checkbox" ${e.visible?'checked':''} onchange="toggleExam('${e.id}')"><span class="slider"></span></label>
+          <button class="btn btn-sec btn-small" onclick="viewExamResults('${e.id}')">Resultados</button>
+          <button class="btn btn-danger btn-small" onclick="delExam('${e.id}')">Eliminar</button>
+        </div>
+      </div>`;
+    }).join('')
+  }</div></div>`;
+}
+function toggleExam(id){
+  const e = portal.exams.find(x=>x.id===id);
+  if(e){ e.visible=!e.visible; saveStore(); renderTeacherContent(); }
+}
+function delExam(id){
+  if(!confirm('¿Eliminar este examen?')) return;
+  portal.exams = portal.exams.filter(e=>e.id!==id);
+  portal.examResults = portal.examResults.filter(r=>r.examId!==id);
+  saveStore(); renderTeacherContent();
+}
+function viewExamResults(id){
+  const exam = portal.exams.find(e=>e.id===id);
+  const results = portal.examResults.filter(r=>r.examId===id);
+  const rows = results.length
+    ? results.map(r=>`<tr><td>${escHtml(r.studentName)}</td><td>${escHtml(r.studentCode)}</td><td style="text-align:center">${r.score}/${r.total}</td><td style="text-align:center"><strong>${((r.score/r.total)*10).toFixed(1)}</strong></td><td>${new Date(r.date).toLocaleString('es-MX')}</td></tr>`).join('')
+    : `<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:1rem">Aún no hay resultados</td></tr>`;
+  openModal(`
+    <div class="modal-head"><h3>Resultados: ${escHtml(exam.title)}</h3><span class="modal-close" onclick="closeModal()">×</span></div>
+    <div class="modal-body">
+      <div style="overflow-x:auto"><table class="grades-table">
+        <thead><tr><th>Alumno</th><th>Código</th><th>Aciertos</th><th>Calif.</th><th>Fecha</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>
+  `);
+}
+
+// ── VISIBILITY (todo junto) ──
+function viewVisibility(){
+  const mats = portal.materials;
+  const exs = portal.exams;
+  if(!mats.length && !exs.length) return `<div class="empty"><div class="big">👁️</div><p>No hay materiales ni exámenes aún.</p></div>`;
+  return `
+    <div class="panel">
+      <h3>👁️ Control de visibilidad en tiempo real</h3>
+      <p class="sub">Activa o desactiva cada material/examen. Los cambios se reflejan inmediatamente en el panel del alumno al actualizar.</p>
+      <div class="btn-row">
+        <button class="btn btn-green" onclick="toggleAllVis(true)">Mostrar todo</button>
+        <button class="btn btn-sec" onclick="toggleAllVis(false)">Ocultar todo</button>
+      </div>
+    </div>
+    ${renderMaterialList(true)}
+    ${renderExamList()}
+  `;
+}
+function toggleAllVis(val){
+  portal.materials.forEach(m=>m.visible=val);
+  portal.exams.forEach(e=>e.visible=val);
+  saveStore(); renderTeacherContent();
+  toast(val?'Todo visible':'Todo oculto','success');
+}
+
+// ── IMPORT / EXPORT ──
+function viewIO(){
+  return `
+    <div class="panel">
+      <h3>💾 Importar / Exportar Portal</h3>
+      <p class="sub">Guarda todo el contenido del portal (materiales, exámenes y datos importados) en un archivo JSON para hacer respaldo o transferir a otro dispositivo.</p>
+      <div class="btn-row">
+        <button class="btn btn-blue" onclick="exportPortal()">📤 Exportar Portal (JSON)</button>
+        <input type="file" id="portalFile" accept=".json" style="display:none" onchange="importPortal(event)">
+        <button class="btn btn-primary" onclick="document.getElementById('portalFile').click()">📥 Importar Portal (JSON)</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>⚠️ Zona de peligro</h3>
+      <p class="sub">Borrar todos los datos del portal. Esta acción no se puede deshacer.</p>
+      <div class="btn-row">
+        <button class="btn btn-danger" onclick="wipePortal()">🗑️ Borrar todo</button>
+      </div>
+    </div>
+  `;
+}
+function exportPortal(){
+  const data = JSON.stringify(portal, null, 2);
+  const blob = new Blob([data], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = `portal_${new Date().toISOString().slice(0,10)}.json`;
+  a.click(); URL.revokeObjectURL(url);
+  toast('Portal exportado ✓','success');
+}
+function importPortal(e){
+  const f = e.target.files[0]; if(!f) return;
+  const r = new FileReader();
+  r.onload = ev => {
+    try{
+      const data = JSON.parse(ev.target.result);
+      if(!data.materials || !data.exams){ toast('Archivo no válido','error'); return; }
+      if(!confirm('¿Reemplazar todos los datos actuales con el archivo importado?')) return;
+      portal = {...portal, ...data};
+      saveStore(); renderTeacherContent();
+      toast('Portal importado ✓','success');
+    }catch(err){ toast('JSON inválido','error'); }
+  };
+  r.readAsText(f); e.target.value='';
+}
+function wipePortal(){
+  if(!confirm('¿Borrar TODO el contenido del portal? Esta acción no se puede deshacer.')) return;
+  if(!confirm('Confirma de nuevo: se eliminarán materiales, exámenes, calificaciones y resultados.')) return;
+  portal = { materials:[], exams:[], calif:null, examResults:[] };
+  saveStore(); renderTeacherContent();
+  toast('Portal borrado','success');
+}
+
+/* ═══════════════════════════════════════════
+   STUDENT AREA
+═══════════════════════════════════════════ */
+let studentTab = 'materials';
+
+function renderStudentTabs(){
+  const tabs = [
+    {id:'materials', label:'📁 Materiales'},
+    {id:'exams', label:'📝 Exámenes'}
+  ];
+  document.getElementById('tabs').innerHTML = tabs.map(t=>`<button class="tab ${studentTab===t.id?'active':''}" onclick="setStudentTab('${t.id}')">${t.label}</button>`).join('');
+  renderStudentContent();
+}
+function setStudentTab(id){ studentTab=id; renderStudentTabs(); }
+
+function matchesStudent(item){
+  if(!item.visible) return false;
+  const gradoOk = item.grado==='all' || item.grado===session.grado;
+  const grupoOk = item.grupo==='all' || item.grupo===session.grupo;
+  return gradoOk && grupoOk;
+}
+
+function renderStudentContent(){
+  const c = document.getElementById('content');
+  if(studentTab==='materials'){
+    const mine = portal.materials.filter(matchesStudent);
+    // Group by type
+    const groups = { link:[], doc:[], image:[], game:[] };
+    mine.forEach(m=>{ if(groups[m.type]) groups[m.type].push(m); });
+    const labels = { link:'🔗 Enlaces web', doc:'📄 Documentos', image:'🖼️ Imágenes', game:'🎮 Juegos' };
+    let html = `<div class="panel"><h3>Hola, ${escHtml(session.label)} 👋</h3><p class="sub">Grado: ${gradoLabel(session.grado)} · Grupo: ${grupoLabel(session.grupo)}</p></div>`;
+    const anyShown = Object.values(groups).some(arr=>arr.length);
+    if(!anyShown){
+      html += `<div class="empty"><div class="big">📭</div><p>Tu maestro aún no ha publicado materiales para tu grupo.</p></div>`;
+    } else {
+      for(const key of ['link','doc','image','game']){
+        const arr = groups[key];
+        if(!arr.length) continue;
+        html += `<div class="panel"><h3>${labels[key]}</h3><div class="mat-grid">${
+          arr.map(m=>`<div class="mat-card" onclick="openMaterial('${m.id}')">
+            <div class="m-icon">${key==='link'?'🔗':key==='doc'?'📄':key==='image'?'🖼️':'🎮'}</div>
+            <h4>${escHtml(m.title)}</h4>
+            <div class="m-desc">${escHtml(m.desc||'')}</div>
+            <span class="m-type">Abrir</span>
+          </div>`).join('')
+        }</div></div>`;
+      }
+    }
+    c.innerHTML = html;
+  } else if(studentTab==='exams'){
+    const mine = portal.exams.filter(matchesStudent);
+    if(!mine.length){
+      c.innerHTML = `<div class="empty"><div class="big">📝</div><p>No hay exámenes disponibles por ahora.</p></div>`;
+      return;
+    }
+    c.innerHTML = `<div class="panel"><h3>Exámenes disponibles</h3><div class="mat-grid">${
+      mine.map(e=>{
+        const done = portal.examResults.find(r=>r.examId===e.id && r.studentCode===session.code);
+        return `<div class="mat-card" onclick="${done?`showExamDone('${e.id}')`:`startExam('${e.id}')`}">
+          <div class="m-icon">📝</div>
+          <h4>${escHtml(e.title)}</h4>
+          <div class="m-desc">${escHtml(e.desc||'')}</div>
+          <span class="m-type">${done?`✓ Calif: ${((done.score/done.total)*10).toFixed(1)}`:`${e.questions.length} preguntas`}</span>
+        </div>`;
+      }).join('')
+    }</div></div>`;
+  }
+}
+
+function openMaterial(id){
+  const m = portal.materials.find(x=>x.id===id);
+  if(!m) return;
+  if(m.type==='link'){
+    window.open(m.content, '_blank');
+    return;
+  }
+  if(m.type==='doc'){
+    // Open base64 as download
+    const a = document.createElement('a');
+    a.href = m.content;
+    a.download = m.filename || m.title;
+    a.click();
+    return;
+  }
+  if(m.type==='image'){
+    openModal(`
+      <div class="modal-head"><h3>${escHtml(m.title)}</h3><span class="modal-close" onclick="closeModal()">×</span></div>
+      <div class="modal-body" style="text-align:center"><img src="${m.content}" style="max-width:100%;border-radius:8px"></div>
+    `);
+    return;
+  }
+  if(m.type==='game'){
+    // Render in iframe via srcdoc
+    const safe = (m.content||'').replace(/"/g,'&quot;');
+    openModal(`
+      <div class="modal-head"><h3>${escHtml(m.title)}</h3><span class="modal-close" onclick="closeModal()">×</span></div>
+      <div class="modal-body" style="padding:0"><iframe srcdoc="${safe}" style="width:100%;height:500px;border:none;border-radius:0 0 14px 14px"></iframe></div>
+    `);
+  }
+}
+
+// ── EXAM taking ──
+let currentExam = null;
+let examAnswers = [];
+
+function startExam(id){
+  const e = portal.exams.find(x=>x.id===id);
+  if(!e) return;
+  currentExam = e;
+  examAnswers = new Array(e.questions.length).fill(-1);
+  renderExamTake();
+}
+function renderExamTake(){
+  const c = document.getElementById('content');
+  const e = currentExam;
+  c.innerHTML = `
+    <div class="panel">
+      <h3>📝 ${escHtml(e.title)}</h3>
+      ${e.desc?`<p class="sub">${escHtml(e.desc)}</p>`:''}
+      <div id="qWrap">${e.questions.map((q,i)=>`
+        <div class="exam-q">
+          <h4>${i+1}. ${escHtml(q.q)}</h4>
+          <div class="exam-opts">${q.opts.map((o,j)=>`
+            <label class="exam-opt ${examAnswers[i]===j?'selected':''}">
+              <input type="radio" name="q${i}" ${examAnswers[i]===j?'checked':''} onchange="examAnswers[${i}]=${j};document.querySelectorAll('.exam-opts input[name=q${i}]').forEach((el,k)=>el.closest('.exam-opt').classList.toggle('selected',k===${j}))">
+              <span>${escHtml(o)}</span>
+            </label>
+          `).join('')}</div>
+        </div>
+      `).join('')}</div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="submitExam()">✓ Enviar respuestas</button>
+        <button class="btn btn-sec" onclick="cancelExam()">Cancelar</button>
+      </div>
+    </div>
+  `;
+}
+function cancelExam(){ currentExam=null; examAnswers=[]; renderStudentContent(); }
+function submitExam(){
+  if(examAnswers.some(a=>a<0)){ if(!confirm('Hay preguntas sin contestar. ¿Enviar de todas formas?')) return; }
+  let score = 0;
+  currentExam.questions.forEach((q,i)=>{ if(examAnswers[i]===q.correct) score++; });
+  portal.examResults.push({
+    examId: currentExam.id, studentCode: session.code, studentName: session.label,
+    score, total: currentExam.questions.length, date: new Date().toISOString()
+  });
+  saveStore();
+  const calif = ((score/currentExam.questions.length)*10).toFixed(1);
+  toast(`Calificación: ${calif} (${score}/${currentExam.questions.length})`,'success');
+  currentExam = null; examAnswers = [];
+  renderStudentContent();
+}
+function showExamDone(id){
+  const e = portal.exams.find(x=>x.id===id);
+  const r = portal.examResults.find(x=>x.examId===id && x.studentCode===session.code);
+  openModal(`
+    <div class="modal-head"><h3>${escHtml(e.title)}</h3><span class="modal-close" onclick="closeModal()">×</span></div>
+    <div class="modal-body" style="text-align:center">
+      <div style="font-size:3.5rem;margin-bottom:.5rem">🎉</div>
+      <p style="font-size:1rem;margin-bottom:1rem">Ya contestaste este examen</p>
+      <div style="font-size:3rem;font-weight:700;color:var(--green)">${((r.score/r.total)*10).toFixed(1)}</div>
+      <p style="color:var(--muted)">${r.score} de ${r.total} aciertos</p>
+      <p style="color:var(--muted);font-size:.82rem;margin-top:.5rem">${new Date(r.date).toLocaleString('es-MX')}</p>
+    </div>
+  `);
+}
+
+/* ═══════════════════════════════════════════
+   PARENT AREA (read-only)
+═══════════════════════════════════════════ */
+let parentTab = 'grades';
+
+function renderParentTabs(){
+  const tabs = [
+    {id:'grades', label:'📊 Calificaciones'},
+    {id:'tasks', label:'📋 Tareas'},
+    {id:'conduct', label:'⚠️ Conducta'},
+    {id:'summary', label:'🏆 Resumen final'}
+  ];
+  document.getElementById('tabs').innerHTML = tabs.map(t=>`<button class="tab ${parentTab===t.id?'active':''}" onclick="setParentTab('${t.id}')">${t.label}</button>`).join('');
+  renderParentContent();
+}
+function setParentTab(id){ parentTab=id; renderParentContent(); renderParentTabs(); }
+
+// Find all groups that contain this student (by qrCode match)
+function getStudentGroups(){
+  if(!portal.calif || !portal.calif.groups) return [];
+  const code = session.code;
+  return portal.calif.groups.filter(g =>
+    (g.students||[]).some(s => s.qrCode && s.qrCode.trim()===code)
+  );
+}
+function getStudentInGroup(g){
+  return (g.students||[]).find(s => s.qrCode && s.qrCode.trim()===session.code);
+}
+function calcAvgForStudent(g, sid){
+  if(!g.activities || !g.grades) return null;
+  let sum=0, cnt=0;
+  g.activities.forEach(a=>{
+    const v = g.grades[sid+'_'+a.id];
+    if(v!==undefined && v!==null && v!==''){
+      const n = parseFloat(v);
+      if(!isNaN(n)){ sum+=n; cnt++; }
+    }
+  });
+  return cnt>0 ? (sum/cnt) : null;
+}
+
+function renderParentContent(){
+  const c = document.getElementById('content');
+  const groups = getStudentGroups();
+  if(!groups.length){
+    c.innerHTML = `<div class="empty"><div class="big">📭</div><p>No hay información registrada para este código.</p></div>`;
+    return;
+  }
+  if(parentTab==='grades') c.innerHTML = renderParentGrades(groups);
+  else if(parentTab==='tasks') c.innerHTML = renderParentTasks(groups);
+  else if(parentTab==='conduct') c.innerHTML = renderParentConduct(groups);
+  else if(parentTab==='summary') c.innerHTML = renderParentSummary(groups);
+}
+
+function renderParentGrades(groups){
+  // Show one table per group (each trimester is a separate group in the Registro)
+  let html = `<div class="panel"><h3>📊 Calificaciones de ${escHtml(session.studentName)}</h3><p class="sub">Sólo lectura · datos del maestro</p></div>`;
+  groups.forEach(g=>{
+    const s = getStudentInGroup(g);
+    if(!s) return;
+    const avg = calcAvgForStudent(g, s.id);
+    const avgStr = avg!==null ? avg.toFixed(1) : '—';
+    const grado = gradoLabel(g.grado), grupo = grupoLabel(parseGrupoLetter(g.name));
+    const trim = g.trimestre ? `Trimestre ${g.trimestre}` : '';
+    html += `
+      <div class="panel">
+        <h3>📚 ${escHtml(g.name)} <span style="font-weight:400;color:var(--muted);font-size:.85rem">${grado} ${grupo} ${trim?'· '+trim:''}</span></h3>
+        <div class="grades-wrap"><table class="grades-table">
+          <thead><tr>
+            <th style="width:38px">#</th>
+            <th>Alumno</th>
+            ${(g.activities||[]).map(a=>`<th class="num">${escHtml(a.name)}</th>`).join('')}
+            <th class="final">Final</th>
+          </tr></thead>
+          <tbody><tr>
+            <td class="num">1</td>
+            <td><strong>${escHtml(s.name)}</strong></td>
+            ${(g.activities||[]).map(a=>{
+              const v = (g.grades||{})[s.id+'_'+a.id];
+              const cls = (v!==undefined && v!=='' && parseFloat(v)<6)?'low':'';
+              return `<td class="num ${cls}">${v!==undefined && v!==null && v!==''?v:'—'}</td>`;
+            }).join('')}
+            <td class="final"><span class="final-chip">${avgStr}</span></td>
+          </tr></tbody>
+        </table></div>
+      </div>`;
+  });
+  return html;
+}
+
+function renderParentTasks(groups){
+  let entregado=0, tarde=0, pendiente=0, total=0;
+  let detail = '';
+  groups.forEach(g=>{
+    const s = getStudentInGroup(g);
+    if(!s) return;
+    const activities = g.activities||[];
+    const hwRows = [];
+    activities.forEach(a=>{
+      const hw = (g.hwStatus||{})[s.id+'_'+a.id] || {};
+      const st = hw.status || '';
+      total++;
+      if(st==='entregado') entregado++;
+      else if(st==='tarde') tarde++;
+      else if(st==='pendiente') pendiente++;
+      if(st){
+        const icon = st==='entregado'?'✅':st==='tarde'?'⏰':'❌';
+        const label = st==='entregado'?'Entregado':st==='tarde'?'Tarde':'No entregado';
+        hwRows.push(`<div class="item"><div class="i-icon">${icon}</div><div class="i-body"><div class="i-title">${escHtml(a.name)}</div><div class="i-meta"><span>${label}</span>${hw.note?`<span>· ${escHtml(hw.note)}</span>`:''}</div></div></div>`);
+      }
+    });
+    if(hwRows.length){
+      detail += `<div class="panel"><h3>📚 ${escHtml(g.name)}</h3><div class="item-list">${hwRows.join('')}</div></div>`;
+    }
+  });
+  const stats = `<div class="stats-grid">
+    <div class="stat green"><div class="label">Entregadas</div><div class="value">${entregado}</div></div>
+    <div class="stat orange"><div class="label">Entregadas tarde</div><div class="value">${tarde}</div></div>
+    <div class="stat red"><div class="label">No entregadas</div><div class="value">${pendiente}</div></div>
+  </div>`;
+  return `<div class="panel"><h3>📋 Reporte de tareas</h3><p class="sub">Estado de entrega de actividades</p></div>${stats}${detail||`<div class="empty"><div class="big">📋</div><p>Aún no hay reportes de entrega registrados.</p></div>`}`;
+}
+
+function renderParentConduct(groups){
+  const clabels = ['','⭐ Excelente','⚠️ Regular','🔶 Mala conducta','🔴 Muy grave'];
+  const cstyles = ['','#2a7a4b','#d68a2a','#c94444','#8b0000'];
+  let html = `<div class="panel"><h3>⚠️ Reporte de conducta</h3><p class="sub">Incidentes registrados por el maestro</p></div>`;
+  let anyBad = false;
+  groups.forEach(g=>{
+    const s = getStudentInGroup(g);
+    if(!s) return;
+    const c = (g.conduct||{})[s.id];
+    if(!c) return;
+    const lev = c.level || 0;
+    if(lev < 3) return; // Only show bad conduct as requested
+    anyBad = true;
+    const incidents = (c.incidents||[]).map(i=>`<div class="item"><div class="i-icon">📌</div><div class="i-body"><div class="i-title">${escHtml(i.text)}</div><div class="i-meta"><span>📅 ${escHtml(i.date)}</span></div></div></div>`).join('');
+    html += `<div class="panel">
+      <h3>📚 ${escHtml(g.name)} <span style="font-weight:400;color:${cstyles[lev]};font-size:.85rem">${clabels[lev]}</span></h3>
+      ${incidents?`<div class="item-list">${incidents}</div>`:'<p style="color:var(--muted)">Sin incidentes detallados</p>'}
+    </div>`;
+  });
+  if(!anyBad) html += `<div class="empty"><div class="big">⭐</div><p>Sin reportes de mala conducta. ¡Excelente!</p></div>`;
+  return html;
+}
+
+function renderParentSummary(groups){
+  // Group by group name (removes trimester distinction) to show 3 trimesters per materia
+  const byName = {};
+  groups.forEach(g=>{
+    const key = g.name.replace(/\s*·\s*Trim.*$/,'').trim();
+    if(!byName[key]) byName[key] = {};
+    const t = g.trimestre || '—';
+    byName[key][t] = g;
+  });
+  let html = `<div class="panel"><h3>🏆 Resumen final por trimestre</h3><p class="sub">Promedio de ${escHtml(session.studentName)} en cada materia</p></div>`;
+  const keys = Object.keys(byName);
+  if(!keys.length){ return html + `<div class="empty"><div class="big">📊</div><p>Sin datos</p></div>`; }
+  keys.forEach(name=>{
+    const trims = byName[name];
+    const cells = ['1','2','3'].map(t=>{
+      const g = trims[t];
+      if(!g) return `<td class="num">—</td>`;
+      const s = getStudentInGroup(g);
+      if(!s) return `<td class="num">—</td>`;
+      const avg = calcAvgForStudent(g, s.id);
+      const val = avg!==null?avg.toFixed(1):'—';
+      const cls = (avg!==null && avg<6)?'low':'';
+      return `<td class="num ${cls}"><strong>${val}</strong></td>`;
+    }).join('');
+    // Final = average of 3 trimesters
+    let finalAvg = null;
+    const avgs = ['1','2','3'].map(t=>{
+      const g = trims[t]; if(!g) return null;
+      const s = getStudentInGroup(g); if(!s) return null;
+      return calcAvgForStudent(g, s.id);
+    }).filter(x=>x!==null);
+    if(avgs.length) finalAvg = avgs.reduce((a,b)=>a+b,0)/avgs.length;
+    const finalStr = finalAvg!==null?finalAvg.toFixed(1):'—';
+    html += `<div class="panel">
+      <div class="grades-wrap"><table class="grades-table">
+        <thead><tr>
+          <th>Materia</th>
+          <th class="num" style="min-width:60px">Trim. 1</th>
+          <th class="num" style="min-width:60px">Trim. 2</th>
+          <th class="num" style="min-width:60px">Trim. 3</th>
+          <th class="final" style="min-width:60px">Final</th>
+        </tr></thead>
+        <tbody><tr>
+          <td><strong>${escHtml(name)}</strong></td>
+          ${cells}
+          <td class="final"><span class="final-chip">${finalStr}</span></td>
+        </tr></tbody>
+      </table></div>
+    </div>`;
+  });
+  return html;
+}
+
+// ── Enter key support on login inputs ─────────
+document.addEventListener('keydown', e=>{
+  if(e.key!=='Enter') return;
+  if(document.activeElement.id==='tUser' || document.activeElement.id==='tPass') loginTeacher();
+  else if(document.activeElement.id==='sCode') loginStudent();
+  else if(document.activeElement.id==='pCode') loginParent();
+});
+
+</script>
+</body>
+</html>
