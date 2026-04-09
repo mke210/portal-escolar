@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Portal Escolar</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
 <style>
 :root{
   --bg:#f5f1e8; --card:#fff; --ink:#1a1a2e; --ink2:#4a4a5e; --muted:#8a8a9a;
@@ -43,6 +45,12 @@ input,select,textarea{font-family:inherit;font-size:14px}
 .topbar .user{display:flex;align-items:center;gap:1rem;font-size:.9rem}
 .topbar .btn-logout{background:rgba(255,255,255,.1);color:#fff;padding:7px 14px;border-radius:8px;font-size:.82rem;transition:background .2s}
 .topbar .btn-logout:hover{background:var(--accent)}
+.conn-dot{display:inline-flex;align-items:center;gap:.4rem;padding:4px 10px;background:rgba(255,255,255,.08);border-radius:100px;font-size:.75rem}
+.conn-dot .dot{width:8px;height:8px;border-radius:50%;background:#888;transition:background .3s}
+.conn-dot.online .dot{background:#4ade80;box-shadow:0 0 6px #4ade80}
+.conn-dot.offline .dot{background:#f87171}
+.conn-dot.connecting .dot{background:#fbbf24;animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 .tabs{background:var(--soft);border-bottom:1.5px solid var(--line);padding:0 1.5rem;display:flex;gap:.2rem;overflow-x:auto}
 .tab{padding:.85rem 1.2rem;color:var(--ink2);border-bottom:3px solid transparent;white-space:nowrap;font-weight:500;transition:all .2s;font-size:.9rem}
 .tab:hover{color:var(--ink)}
@@ -178,6 +186,7 @@ input,select,textarea{font-family:inherit;font-size:14px}
   <div class="landing-header">
     <h1>Portal Escolar</h1>
     <p>Acceso para maestros, alumnos y padres de familia</p>
+    <div id="landingConn" class="conn-dot connecting" style="margin-top:1rem;background:rgba(0,0,0,.06);color:var(--ink2)"><span class="dot"></span><span id="landingConnLabel">Conectando…</span></div>
   </div>
   <div class="cards">
     <!-- MAESTRO -->
@@ -222,6 +231,7 @@ input,select,textarea{font-family:inherit;font-size:14px}
   <div class="topbar">
     <div class="brand"><span id="brandIcon">📚</span><span id="brandText">Portal Escolar</span></div>
     <div class="user">
+      <span id="connDot" class="conn-dot connecting"><span class="dot"></span><span id="connLabel">Conectando…</span></span>
       <span id="userLabel"></span>
       <button class="btn-logout" onclick="logout()">Salir</button>
     </div>
@@ -254,7 +264,7 @@ let portal = {
 };
 let session = null;   // {role,label} | null
 
-function saveStore(){ localStorage.setItem(STORE_KEY, JSON.stringify(portal)); }
+function saveStore(){ localStorage.setItem(STORE_KEY, JSON.stringify(portal)); syncToFirebase(); }
 function loadStore(){
   try{
     const raw = localStorage.getItem(STORE_KEY);
@@ -268,6 +278,139 @@ function loadStore(){
   }catch(e){console.error(e)}
 }
 loadStore();
+
+/* ═══════════════════════════════════════════
+   FIREBASE SYNC
+═══════════════════════════════════════════ */
+const firebaseConfig = {
+  apiKey: "AIzaSyCz-FODGcc8Kq9sEEWlPZJ2j4qNyJj-rxo",
+  authDomain: "portal-escolar-de-informatica.firebaseapp.com",
+  databaseURL: "https://portal-escolar-de-informatica-default-rtdb.firebaseio.com",
+  projectId: "portal-escolar-de-informatica",
+  storageBucket: "portal-escolar-de-informatica.firebasestorage.app",
+  messagingSenderId: "162557187689",
+  appId: "1:162557187689:web:10f00e4f7f653cd7a774f8"
+};
+
+let fbApp=null, fbDb=null, fbConnected=false, fbReady=false;
+let syncTimer=null, suppressSync=false;
+
+function setConnState(state, label){
+  ['connDot','landingConn'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    el.classList.remove('online','offline','connecting');
+    el.classList.add(state);
+  });
+  ['connLabel','landingConnLabel'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.textContent = label;
+  });
+}
+
+function initFirebase(){
+  try{
+    fbApp = firebase.initializeApp(firebaseConfig);
+    fbDb = firebase.database();
+    fbReady = true;
+    // Connection state listener
+    fbDb.ref('.info/connected').on('value', snap=>{
+      fbConnected = !!snap.val();
+      if(fbConnected){
+        setConnState('online','En línea');
+        subscribeFirebase();
+      } else {
+        setConnState('offline','Sin conexión');
+      }
+    });
+  }catch(err){
+    console.error('Firebase init error',err);
+    setConnState('offline','Error de conexión');
+  }
+}
+
+function subscribeFirebase(){
+  if(!fbReady) return;
+  // Teacher data (materials, exams, calif)
+  fbDb.ref('portal/data').on('value', snap=>{
+    const v = snap.val();
+    if(v){
+      suppressSync = true;
+      portal.materials = v.materials || [];
+      portal.exams = v.exams || [];
+      portal.calif = v.calif || null;
+      localStorage.setItem(STORE_KEY, JSON.stringify(portal));
+      suppressSync = false;
+      if(session && (session.role==='teacher' || session.role==='student' || session.role==='parent')){
+        // Re-render current view
+        if(session.role==='teacher') renderTeacherContent();
+        else if(session.role==='student') renderStudentContent();
+        else if(session.role==='parent') renderParentContent();
+      }
+    }
+  });
+  // Exam results (separate path for atomic pushes)
+  fbDb.ref('portal/results').on('value', snap=>{
+    const v = snap.val();
+    if(v){
+      suppressSync = true;
+      portal.examResults = Object.values(v);
+      localStorage.setItem(STORE_KEY, JSON.stringify(portal));
+      suppressSync = false;
+      if(session && session.role==='teacher') renderTeacherContent();
+      if(session && session.role==='student') renderStudentContent();
+    } else {
+      portal.examResults = [];
+    }
+  });
+}
+
+function syncToFirebase(immediate){
+  if(!fbReady || !fbConnected || suppressSync) return;
+  // Only teachers push to Firebase
+  if(!session || session.role!=='teacher') return;
+  clearTimeout(syncTimer);
+  const doSync = ()=>{
+    fbDb.ref('portal/data').set({
+      materials: portal.materials || [],
+      exams: portal.exams || [],
+      calif: portal.calif || null,
+      updatedAt: Date.now()
+    }).catch(err=>{
+      console.error('Sync error',err);
+      toast('Error al sincronizar con Firebase','error');
+    });
+  };
+  if(immediate) doSync();
+  else syncTimer = setTimeout(doSync, 800); // debounce
+}
+
+function pushExamResult(result){
+  if(fbReady && fbConnected){
+    fbDb.ref('portal/results').push(result).catch(err=>{
+      console.error('Push result error',err);
+    });
+  }
+}
+
+function forcePublish(){
+  if(!fbReady){ toast('Firebase no se inicializó','error'); return; }
+  if(!fbConnected){ toast('Sin conexión a Firebase','error'); return; }
+  fbDb.ref('portal/data').set({
+    materials: portal.materials || [],
+    exams: portal.exams || [],
+    calif: portal.calif || null,
+    updatedAt: Date.now()
+  }).then(()=>{
+    toast('Publicado a Firebase ✓','success');
+  }).catch(err=>{
+    console.error(err);
+    toast('Error: '+err.message,'error');
+  });
+}
+
+// Initialize Firebase on page load
+initFirebase();
 
 // ── Utils ─────────────────────────────────────
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
@@ -425,7 +568,7 @@ function viewCalif(){
         <button class="btn btn-green" onclick="syncFromBrowser()">🔄 Sincronizar desde este navegador</button>
         ${hasCalif?'<button class="btn btn-danger" onclick="clearCalif()">🗑️ Borrar datos importados</button>':''}
       </div>
-      <p class="sub" style="margin-top:.8rem;margin-bottom:0;font-size:.8rem">💡 <strong>Sincronizar desde este navegador</strong> lee directamente los datos del Registro si ambos archivos (Index.html y Portal.html) están abiertos en el mismo servidor o carpeta hospedada. Úsalo para refrescar al instante cuando cambies algo en el Registro.</p>
+      <p class="sub" style="margin-top:.8rem;margin-bottom:0;font-size:.8rem">💡 <strong>Sincronizar desde este navegador</strong> lee los datos del Registro si ambos archivos (Index.html y Portal.html) están abiertos en el mismo origen. ☁️ Todo lo que importes o modifiques se publica <strong>automáticamente en Firebase</strong> para que padres y alumnos lo vean en tiempo real desde cualquier dispositivo.</p>
     </div>
     ${stats}
     ${hasCalif?renderCalifGroupList():`<div class="empty"><div class="big">📊</div><p>Aún no has importado calificaciones.<br>Usa el botón de arriba para cargar el JSON.</p></div>`}
@@ -833,6 +976,13 @@ function toggleAllVis(val){
 function viewIO(){
   return `
     <div class="panel">
+      <h3>☁️ Sincronización con Firebase</h3>
+      <p class="sub">Los cambios se publican automáticamente cuando estás en línea. Usa este botón si quieres forzar una publicación inmediata.</p>
+      <div class="btn-row">
+        <button class="btn btn-green" onclick="forcePublish()">☁️ Publicar todo a Firebase ahora</button>
+      </div>
+    </div>
+    <div class="panel">
       <h3>💾 Importar / Exportar Portal</h3>
       <p class="sub">Guarda todo el contenido del portal (materiales, exámenes y datos importados) en un archivo JSON para hacer respaldo o transferir a otro dispositivo.</p>
       <div class="btn-row">
@@ -1024,11 +1174,13 @@ function submitExam(){
   if(examAnswers.some(a=>a<0)){ if(!confirm('Hay preguntas sin contestar. ¿Enviar de todas formas?')) return; }
   let score = 0;
   currentExam.questions.forEach((q,i)=>{ if(examAnswers[i]===q.correct) score++; });
-  portal.examResults.push({
+  const result = {
     examId: currentExam.id, studentCode: session.code, studentName: session.label,
     score, total: currentExam.questions.length, date: new Date().toISOString()
-  });
-  saveStore();
+  };
+  portal.examResults.push(result);
+  localStorage.setItem(STORE_KEY, JSON.stringify(portal));
+  pushExamResult(result);
   const calif = ((score/currentExam.questions.length)*10).toFixed(1);
   toast(`Calificación: ${calif} (${score}/${currentExam.questions.length})`,'success');
   currentExam = null; examAnswers = [];
