@@ -950,7 +950,16 @@ let examDraft = { title:'', desc:'', grado:'all', grupo:'all', questions:[] };
 function viewExams(){
   return `
     <div class="panel">
-      <h3>📝 Crear Examen</h3>
+      <h3>📄 Importar / Exportar examen Word</h3>
+      <p class="sub">Sube un archivo .docx con tus preguntas para que el Portal las cargue automáticamente. El formato esperado es: cada pregunta numerada (<code>1.</code>, <code>2.</code>…) seguida de sus opciones <code>a)</code> <code>b)</code> <code>c)</code> <code>d)</code>. Para marcar la respuesta correcta, ponle un asterisco delante de la letra: <code>*b)</code>.</p>
+      <input type="file" id="examFile" accept=".docx" style="display:none" onchange="importExamWord(event)">
+      <div class="btn-row">
+        <button class="btn btn-blue" onclick="document.getElementById('examFile').click()">📥 Importar examen Word (.docx)</button>
+        <button class="btn btn-sec" onclick="showExamFormatHelp()">❓ Ver formato de ejemplo</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>📝 ${examDraft.questions.length?'Editar examen':'Crear examen'}</h3>
       <div class="form-row">
         <div class="form-group"><label>Título</label>
           <input type="text" id="exTitle" value="${escHtml(examDraft.title)}" oninput="examDraft.title=this.value" placeholder="Ej: Evaluación trimestre 1"></div>
@@ -1028,6 +1037,23 @@ function saveExam(){
     if(!q.q.trim()){ toast('Hay una pregunta vacía','error'); return; }
     if(q.opts.some(o=>!o.trim())){ toast('Hay opciones vacías','error'); return; }
   }
+  if(examDraft._editingId){
+    // Replace existing exam
+    const idx = portal.exams.findIndex(e=>e.id===examDraft._editingId);
+    if(idx>=0){
+      const old = portal.exams[idx];
+      portal.exams[idx] = {
+        ...old,
+        title:examDraft.title.trim(), desc:examDraft.desc.trim(),
+        grado:examDraft.grado, grupo:examDraft.grupo,
+        questions: JSON.parse(JSON.stringify(examDraft.questions)),
+        updatedAt: new Date().toISOString()
+      };
+      saveStore(); resetExamDraft(); renderTeacherContent();
+      toast('Examen actualizado ✓','success');
+      return;
+    }
+  }
   portal.exams.push({
     id: uid(), title:examDraft.title.trim(), desc:examDraft.desc.trim(),
     grado:examDraft.grado, grupo:examDraft.grupo,
@@ -1063,6 +1089,8 @@ function renderExamList(){
         </div>
         <div class="i-actions">
           <label class="switch"><input type="checkbox" ${e.visible?'checked':''} onchange="toggleExam('${e.id}')"><span class="slider"></span></label>
+          <button class="btn btn-sec btn-small" onclick="exportExamWord('${e.id}')">📤 Word</button>
+          <button class="btn btn-sec btn-small" onclick="loadExamForEdit('${e.id}')">✏️ Editar</button>
           <button class="btn btn-sec btn-small" onclick="viewExamResults('${e.id}')">Resultados</button>
           <button class="btn btn-danger btn-small" onclick="delExam('${e.id}')">Eliminar</button>
         </div>
@@ -1074,6 +1102,228 @@ function toggleExam(id){
   const e = portal.exams.find(x=>x.id===id);
   if(e){ e.visible=!e.visible; saveStore(); renderTeacherContent(); }
 }
+// ── EXAM WORD IMPORT/EXPORT ──
+let _mammothLoaded = false;
+function _loadMammoth(){
+  return new Promise((resolve, reject)=>{
+    if(_mammothLoaded && window.mammoth){ resolve(); return; }
+    const cdns = [
+      'https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.7.2/mammoth.browser.min.js',
+      'https://unpkg.com/mammoth@1.7.2/mammoth.browser.min.js',
+      'https://cdn.jsdelivr.net/npm/mammoth@1.7.2/mammoth.browser.min.js'
+    ];
+    let i=0;
+    const tryNext = ()=>{
+      if(i>=cdns.length){ reject(new Error('No se pudo cargar mammoth.js')); return; }
+      const s = document.createElement('script');
+      s.src = cdns[i++];
+      s.onload = ()=>{ _mammothLoaded=true; resolve(); };
+      s.onerror = tryNext;
+      document.head.appendChild(s);
+    };
+    tryNext();
+  });
+}
+
+// Parse plain text into questions/options
+function parseExamText(text){
+  // Normalize line breaks and split
+  const lines = text.replace(/\r\n/g,'\n').replace(/\xa0/g,' ').split('\n')
+    .map(l=>l.trim()).filter(l=>l.length>0);
+  const questions = [];
+  let current = null;
+  // Regexes
+  const reQ = /^\*?(\d+)[\.\)]\s*(.+)$/;            // "1. text" or "*1. text"
+  const reOpt = /^(\*?)\s*([a-zA-Z])[\)\.]\s*(.+)$/; // "a) text", "*a) text", "A. text"
+  const reCorrectMark = /\s*(?:\[\s*[xX✓✔]\s*\]|\(correcta?\)|\*\s*$)/i;
+
+  for(const line of lines){
+    let m = line.match(reQ);
+    if(m && !line.match(/^[a-dA-D][\)\.]/)){ // make sure it's not an option that starts with digit
+      // Push previous
+      if(current && current.opts.length>=2) questions.push(current);
+      current = { q: m[2].trim().replace(/[:：]\s*$/,''), opts: [], correct: 0, _hasMark: false };
+      continue;
+    }
+    m = line.match(reOpt);
+    if(m && current){
+      const isCorrectByPrefix = m[1] === '*';
+      let optText = m[3].trim();
+      let isCorrectBySuffix = false;
+      const sm = optText.match(reCorrectMark);
+      if(sm){ isCorrectBySuffix = true; optText = optText.replace(reCorrectMark,'').trim(); }
+      current.opts.push(optText);
+      if(isCorrectByPrefix || isCorrectBySuffix){
+        current.correct = current.opts.length - 1;
+        current._hasMark = true;
+      }
+      continue;
+    }
+    // Continuation of question text (no leading number)?
+    if(current && current.opts.length===0 && line.length>2){
+      current.q += ' ' + line;
+    }
+  }
+  if(current && current.opts.length>=2) questions.push(current);
+
+  // Stats
+  const unmarked = questions.filter(q=>!q._hasMark).length;
+  questions.forEach(q=>{ delete q._hasMark; });
+  return { questions, unmarked };
+}
+
+function importExamWord(event){
+  const file = event.target.files[0];
+  if(!file) return;
+  toast('Procesando archivo Word…','success');
+  _loadMammoth().then(()=>{
+    const reader = new FileReader();
+    reader.onload = ev => {
+      window.mammoth.extractRawText({ arrayBuffer: ev.target.result })
+        .then(result => {
+          const text = result.value || '';
+          const parsed = parseExamText(text);
+          if(!parsed.questions.length){
+            toast('No se encontraron preguntas en el archivo. Revisa el formato.','error');
+            return;
+          }
+          // Try to extract a title from the first lines
+          const firstLines = text.split('\n').map(l=>l.trim()).filter(l=>l.length>0).slice(0,5);
+          let title = '';
+          for(const l of firstLines){
+            if(!l.match(/^\d+[\.\)]/) && !l.match(/^[a-dA-D][\)\.]/) && l.length<120){
+              title = l; break;
+            }
+          }
+          // Populate draft (preserve existing fields if user already set them)
+          if(!examDraft.title) examDraft.title = title || file.name.replace(/\.docx?$/i,'');
+          examDraft.questions = parsed.questions;
+          renderTeacherContent();
+          let msg = `✓ ${parsed.questions.length} preguntas importadas`;
+          if(parsed.unmarked > 0){
+            msg += ` · ⚠️ ${parsed.unmarked} sin respuesta marcada (revísalas y marca la correcta antes de guardar)`;
+          }
+          toast(msg, parsed.unmarked>0?'error':'success');
+        })
+        .catch(err => { console.error(err); toast('Error al leer el .docx: '+err.message,'error'); });
+    };
+    reader.readAsArrayBuffer(file);
+  }).catch(err => {
+    toast('No se pudo cargar el lector de Word: '+err.message,'error');
+  });
+  event.target.value = '';
+}
+
+function exportExamWord(id){
+  const e = portal.exams.find(x=>x.id===id);
+  if(!e) return;
+  const today = new Date().toLocaleDateString('es-MX',{day:'2-digit',month:'long',year:'numeric'});
+  const grado = e.grado==='all' ? 'Todos los grados' : gradoLabel(e.grado);
+  const grupo = e.grupo==='all' ? 'Todos los grupos' : 'Grupo '+e.grupo;
+
+  // Build the question/options HTML
+  // The correct answer is marked with * before the letter
+  const letters = ['a','b','c','d','e','f','g','h'];
+  const questionsHtml = e.questions.map((q, i) => {
+    const opts = q.opts.map((o, j) => {
+      const isCorrect = j === q.correct;
+      const letter = letters[j] || String.fromCharCode(97+j);
+      const prefix = isCorrect ? '*' : '';
+      return `<p style="margin:0 0 4pt 18pt">${prefix}${letter}) ${escHtml(o)}</p>`;
+    }).join('');
+    return `<p style="margin:14pt 0 6pt 0;font-weight:bold">${i+1}. ${escHtml(q.q)}</p>${opts}`;
+  }).join('');
+
+  const html = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
+<head>
+<meta charset="UTF-8">
+<title>${escHtml(e.title)}</title>
+<!--[if gte mso 9]><xml>
+<w:WordDocument><w:View>Print</w:View><w:Zoom>100</w:Zoom></w:WordDocument>
+</xml><![endif]-->
+<style>
+@page { size: letter; margin: 2cm; }
+body { font-family: 'Calibri', Arial, sans-serif; font-size: 12pt; color: #000; line-height: 1.4; }
+h1 { font-size: 16pt; text-align: center; margin: 0 0 12pt 0; }
+.header-info { margin: 8pt 0; font-size: 11pt; }
+.instructions { margin: 12pt 0; font-style: italic; }
+.legend { font-size: 9pt; color: #666; border-top: 1px solid #ccc; padding-top: 6pt; margin-top: 24pt; }
+</style>
+</head>
+<body>
+<h1><b>${escHtml(e.title)}</b></h1>
+${e.desc ? `<p style="text-align:center;font-size:11pt;color:#444;margin:0 0 14pt 0">${escHtml(e.desc)}</p>` : ''}
+<p class="header-info"><b>Nombre del Alumno/a:</b> _________________________________________________</p>
+<p class="header-info"><b>Fecha:</b> ____________________ &nbsp;&nbsp; <b>${escHtml(grado)}</b> &nbsp;&nbsp; <b>${escHtml(grupo)}</b> &nbsp;&nbsp; <b>Aciertos:</b> _______ / ${e.questions.length}</p>
+<p class="instructions"><b>Instrucciones:</b> Lee cuidadosamente cada pregunta y selecciona la opción que consideres correcta. Solo una respuesta es válida por pregunta.</p>
+${questionsHtml}
+<p class="legend">📝 Generado el ${today} desde Portal Escolar. La respuesta correcta está marcada con un asterisco (*) antes de la letra. Borra los asteriscos antes de imprimir si no quieres que los alumnos los vean.</p>
+</body>
+</html>`;
+
+  const blob = new Blob(['\ufeff', html], { type: 'application/msword' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = e.title.replace(/[^a-zA-Z0-9_\-]+/g,'_') + '.doc';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('Examen exportado a Word ✓','success');
+}
+
+function loadExamForEdit(id){
+  const e = portal.exams.find(x=>x.id===id);
+  if(!e) return;
+  examDraft = {
+    _editingId: e.id,
+    title: e.title, desc: e.desc||'',
+    grado: e.grado, grupo: e.grupo,
+    questions: JSON.parse(JSON.stringify(e.questions))
+  };
+  renderTeacherContent();
+  toast('Examen cargado para edición. Al guardar, reemplaza el original.','success');
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+function showExamFormatHelp(){
+  openModal(`
+    <div class="modal-head">
+      <h3>📄 Formato esperado para importar Word</h3>
+      <span class="modal-close" onclick="closeModal()">×</span>
+    </div>
+    <div class="modal-body">
+      <p class="sub" style="margin-bottom:1rem">El Portal extrae preguntas y opciones de un documento .docx. Usa este formato (puedes copiarlo y pegarlo en Word):</p>
+      <pre style="background:var(--soft);border:1.5px solid var(--line);border-radius:10px;padding:1rem;font-size:.82rem;line-height:1.6;overflow-x:auto;font-family:monospace;color:var(--ink)">Evaluación de Informática
+
+Nombre del Alumno/a: _____________
+Fecha: ______ Grado y Grupo: ______
+
+Instrucciones: Lee cuidadosamente cada pregunta...
+
+1. La acción de "Clic" en el ratón se utiliza para:
+a) Abrir un menú contextual.
+*b) Seleccionar un objeto o activar un botón.
+c) Desplazarse hacia arriba o abajo.
+d) Arrastrar un elemento.
+
+2. ¿Qué teclas se usan para copiar texto?
+a) Ctrl + X
+*b) Ctrl + C
+c) Ctrl + V
+d) Ctrl + Z</pre>
+      <h3 style="margin-top:1rem;font-size:.95rem">Reglas:</h3>
+      <ul style="font-size:.85rem;line-height:1.7;padding-left:1.3rem;color:var(--ink2)">
+        <li>Las preguntas empiezan con un número y un punto: <code>1.</code>, <code>2.</code>, <code>3.</code>…</li>
+        <li>Las opciones empiezan con la letra y paréntesis: <code>a)</code>, <code>b)</code>, <code>c)</code>, <code>d)</code></li>
+        <li>Marca la respuesta correcta con un <strong>asterisco antes de la letra</strong>: <code>*b)</code></li>
+        <li>También funciona poniendo <code>[✓]</code>, <code>[X]</code> o <code>(correcta)</code> al final de la opción correcta.</li>
+        <li>Si no marcas ninguna correcta, el Portal asume la primera opción y te avisa para que la corrijas manualmente.</li>
+        <li>Los títulos de bloques o secciones se ignoran (no afectan).</li>
+      </ul>
+    </div>
+  `);
+}
+
 function delExam(id){
   if(!confirm('¿Eliminar este examen?')) return;
   portal.exams = portal.exams.filter(e=>e.id!==id);
