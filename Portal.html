@@ -461,17 +461,15 @@ function loginTeacher(){
   }
 }
 
-function _normCode(s){ return String(s||'').trim().toUpperCase().replace(/\s+/g,''); }
-
 function findStudentByCode(code){
   if(!portal.calif || !portal.calif.groups) return null;
-  const target = _normCode(code);
-  if(!target) return null;
-  // Search across all groups; case-insensitive, whitespace-forgiving
+  code = (code||'').trim();
+  if(!code) return null;
+  // Search across all groups; return first match with metadata
   for(const g of portal.calif.groups){
     if(!g.students) continue;
     for(const s of g.students){
-      if(s.qrCode && _normCode(s.qrCode) === target){
+      if(s.qrCode && s.qrCode.trim() === code){
         return { student:s, group:g };
       }
     }
@@ -479,35 +477,11 @@ function findStudentByCode(code){
   return null;
 }
 
-function countStudentsWithCode(){
-  if(!portal.calif || !portal.calif.groups) return { total:0, withCode:0 };
-  const seen = new Set();
-  const seenWithCode = new Set();
-  portal.calif.groups.forEach(g=>{
-    (g.students||[]).forEach(s=>{
-      seen.add(s.name);
-      if(s.qrCode && s.qrCode.trim()) seenWithCode.add(s.name);
-    });
-  });
-  return { total: seen.size, withCode: seenWithCode.size };
-}
-
 function loginStudent(){
   const code = document.getElementById('sCode').value.trim();
-  if(!code){ document.getElementById('sErr').textContent = 'Escribe tu código'; return; }
-  if(!portal.calif || !portal.calif.groups){
-    document.getElementById('sErr').textContent = 'El maestro aún no ha cargado datos';
-    return;
-  }
+  if(!portal.calif){ document.getElementById('sErr').textContent = 'El maestro aún no ha cargado datos'; return; }
   const match = findStudentByCode(code);
-  if(!match){
-    const st = countStudentsWithCode();
-    let msg = `Código "${code}" no encontrado.`;
-    if(st.withCode===0) msg += ` Ningún alumno tiene código asignado aún (pídele a tu maestro).`;
-    else msg += ` Hay ${st.withCode} de ${st.total} alumnos con código. Revisa mayúsculas y espacios.`;
-    document.getElementById('sErr').textContent = msg;
-    return;
-  }
+  if(!match){ document.getElementById('sErr').textContent = 'Código no encontrado'; return; }
   session = { role:'student', code, label:match.student.name,
               grado:match.group.grado||'', grupo:parseGrupoLetter(match.group.name), studentId:match.student.id };
   showApp();
@@ -515,20 +489,9 @@ function loginStudent(){
 
 function loginParent(){
   const code = document.getElementById('pCode').value.trim();
-  if(!code){ document.getElementById('pErr').textContent = 'Escribe el código de tu hijo'; return; }
-  if(!portal.calif || !portal.calif.groups){
-    document.getElementById('pErr').textContent = 'El maestro aún no ha cargado datos';
-    return;
-  }
+  if(!portal.calif){ document.getElementById('pErr').textContent = 'El maestro aún no ha cargado datos'; return; }
   const match = findStudentByCode(code);
-  if(!match){
-    const st = countStudentsWithCode();
-    let msg = `Código "${code}" no encontrado.`;
-    if(st.withCode===0) msg += ` Ningún alumno tiene código. Pídele al maestro que asigne uno.`;
-    else msg += ` Hay ${st.withCode} de ${st.total} alumnos con código. Revisa mayúsculas y espacios.`;
-    document.getElementById('pErr').textContent = msg;
-    return;
-  }
+  if(!match){ document.getElementById('pErr').textContent = 'Código no encontrado'; return; }
   session = { role:'parent', code, label:'Padre de '+match.student.name,
               studentName:match.student.name, studentId:match.student.id };
   showApp();
@@ -604,13 +567,6 @@ function viewCalif(){
         <div class="stat"><div class="label">Grupos</div><div class="value">${nG}</div><div class="sub">importados</div></div>
         <div class="stat green"><div class="label">Alumnos únicos</div><div class="value">${nS.size}</div></div>
         <div class="stat orange"><div class="label">Con código</div><div class="value">${withCode.size}</div><div class="sub">de ${nS.size}</div></div>
-      </div>
-      <div class="panel">
-        <h3>🔑 Códigos de acceso de alumnos</h3>
-        <p class="sub">Estos son los códigos exactos con los que los alumnos y padres pueden entrar. Si alguno falta, asígnalo en el Registro de Calificaciones y vuelve a importar.</p>
-        <div class="btn-row">
-          <button class="btn btn-blue" onclick="showCodesList()">👁️ Ver lista completa de códigos</button>
-        </div>
       </div>`;
   }
   return `
@@ -629,64 +585,6 @@ function viewCalif(){
     ${hasCalif?renderCalifGroupList():`<div class="empty"><div class="big">📊</div><p>Aún no has importado calificaciones.<br>Usa el botón de arriba para cargar el JSON.</p></div>`}
   `;
 }
-
-function showCodesList(){
-  if(!portal.calif || !portal.calif.groups){ toast('No hay datos importados','error'); return; }
-  const map = {};
-  portal.calif.groups.forEach(g=>{
-    (g.students||[]).forEach(s=>{
-      if(!map[s.name]) map[s.name] = { name:s.name, code:s.qrCode||'', groups:new Set() };
-      if(s.qrCode && !map[s.name].code) map[s.name].code = s.qrCode;
-      map[s.name].groups.add(g.name);
-    });
-  });
-  const list = Object.values(map).sort((a,b)=>a.name.localeCompare(b.name));
-  const withCode = list.filter(x=>x.code);
-  const withoutCode = list.filter(x=>!x.code);
-  const rows = withCode.map(x=>`
-    <tr>
-      <td>${escHtml(x.name)}</td>
-      <td><code style="background:var(--soft);padding:3px 10px;border-radius:6px;font-weight:700;color:var(--accent)">${escHtml(x.code)}</code></td>
-      <td style="font-size:.78rem;color:var(--muted)">${[...x.groups].join(', ')}</td>
-    </tr>
-  `).join('') || `<tr><td colspan="3" style="text-align:center;padding:1rem;color:var(--muted)">Ningún alumno tiene código asignado.</td></tr>`;
-  const missing = withoutCode.length
-    ? `<div style="margin-top:1rem;padding:1rem;background:#fff7ee;border:1.5px solid #f0c080;border-radius:10px">
-       <strong style="color:var(--orange)">⚠️ Alumnos sin código (${withoutCode.length})</strong>
-       <p class="sub" style="margin:.4rem 0">Estos no podrán entrar hasta que les asignes código en el Registro y reimportes.</p>
-       <div style="display:flex;flex-wrap:wrap;gap:.4rem">${withoutCode.map(x=>`<span class="pill pill-off">${escHtml(x.name)}</span>`).join('')}</div></div>`
-    : '';
-  window._codesForCopy = withCode;
-  openModal(`
-    <div class="modal-head">
-      <h3>🔑 Códigos de alumnos (${withCode.length}/${list.length})</h3>
-      <span class="modal-close" onclick="closeModal()">×</span>
-    </div>
-    <div class="modal-body">
-      <p class="sub" style="margin-bottom:1rem">Tabla de códigos exactos. Al entrar, el código <strong>no es sensible a mayúsculas</strong> ni a espacios al inicio/final — pero sí debe coincidir el contenido.</p>
-      <div style="overflow-x:auto"><table class="grades-table" style="min-width:auto">
-        <thead><tr><th>Alumno</th><th>Código</th><th>Grupo(s)</th></tr></thead>
-        <tbody>${rows}</tbody>
-      </table></div>
-      ${missing}
-      <div class="btn-row" style="margin-top:1rem">
-        <button class="btn btn-sec" onclick="copyCodesToClipboard()">📋 Copiar tabla al portapapeles</button>
-      </div>
-    </div>
-  `);
-}
-
-function copyCodesToClipboard(){
-  const list = window._codesForCopy || [];
-  const text = 'Alumno\tCódigo\n' + list.map(x=>`${x.name}\t${x.code}`).join('\n');
-  navigator.clipboard.writeText(text).then(()=>toast('Copiado al portapapeles','success')).catch(()=>{
-    const ta = document.createElement('textarea'); ta.value = text;
-    document.body.appendChild(ta); ta.select();
-    try{ document.execCommand('copy'); toast('Copiado','success'); }catch(e){}
-    document.body.removeChild(ta);
-  });
-}
-
 function renderCalifGroupList(){
   const groups = portal.calif.groups || [];
   return `<div class="panel"><h3>Grupos importados</h3><div class="item-list">${
@@ -714,16 +612,14 @@ function importCalif(e){
   r.onload = ev => {
     try{
       const data = JSON.parse(ev.target.result);
+      // Accept both formats: raw {groups:[]} or wrapped
       let groups = null;
       if(Array.isArray(data.groups)) groups = data.groups;
       else if(data.regCalif_v3 && Array.isArray(data.regCalif_v3.groups)) groups = data.regCalif_v3.groups;
       if(!groups){ toast('El archivo no contiene grupos reconocibles','error'); return; }
       portal.calif = { groups, importedAt: new Date().toISOString() };
-      saveStore();
-      syncToFirebase(true); // IMMEDIATE, don't wait for debounce
-      renderTeacherContent();
-      const st = countStudentsWithCode();
-      toast(`Importados ${groups.length} grupos · ${st.withCode}/${st.total} alumnos con código ✓`,'success');
+      saveStore(); renderTeacherContent();
+      toast(`Importados ${groups.length} grupos ✓`,'success');
     }catch(err){ toast('Archivo JSON inválido','error'); }
   };
   r.readAsText(f);
@@ -736,11 +632,8 @@ function syncFromBrowser(){
     const data = JSON.parse(raw);
     if(!data.groups || !Array.isArray(data.groups)){ toast('Los datos del navegador no son válidos','error'); return; }
     portal.calif = { groups: data.groups, importedAt: new Date().toISOString() };
-    saveStore();
-    syncToFirebase(true); // IMMEDIATE
-    renderTeacherContent();
-    const st = countStudentsWithCode();
-    toast(`Sincronizado: ${data.groups.length} grupos · ${st.withCode}/${st.total} con código ✓`,'success');
+    saveStore(); renderTeacherContent();
+    toast(`Sincronizado: ${data.groups.length} grupos ✓`,'success');
   }catch(err){ toast('Error al leer datos del navegador','error'); }
 }
 function clearCalif(){
