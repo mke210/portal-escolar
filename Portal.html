@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Portal Escolar</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.11.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/12.11.0/firebase-database-compat.js"></script>
 <style>
 :root{
   --bg:#f5f1e8; --card:#fff; --ink:#1a1a2e; --ink2:#4a4a5e; --muted:#8a8a9a;
@@ -309,6 +309,17 @@ function setConnState(state, label){
 }
 
 function initFirebase(){
+  if(typeof firebase === 'undefined'){
+    // SDK not loaded yet — retry a few times
+    initFirebase.tries = (initFirebase.tries||0) + 1;
+    if(initFirebase.tries < 20){
+      setTimeout(initFirebase, 250);
+      return;
+    }
+    console.error('Firebase SDK no se cargó. Verifica tu conexión o bloqueadores de scripts.');
+    setConnState('offline','SDK no cargado');
+    return;
+  }
   try{
     fbApp = firebase.initializeApp(firebaseConfig);
     fbDb = firebase.database();
