@@ -175,6 +175,166 @@ input,select,textarea{font-family:inherit;font-size:14px}
   .topbar .brand{font-size:1.1rem}
   .tabs{padding:0 .8rem}
 }
+
+/* ═══════════ PARENT MODE — youthful, animated, formal ═══════════ */
+body.parent-mode{
+  background:linear-gradient(135deg,#1e3c72 0%,#2a5298 25%,#7e22ce 50%,#2a5298 75%,#1e3c72 100%);
+  background-size:400% 400%;
+  animation:parentBgShift 18s ease infinite;
+}
+@keyframes parentBgShift{
+  0%,100%{background-position:0% 50%}
+  50%{background-position:100% 50%}
+}
+body.parent-mode .topbar{
+  background:rgba(15,23,42,0.85);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid rgba(255,255,255,0.1);
+}
+body.parent-mode .tabs{
+  background:rgba(255,255,255,0.95);
+  backdrop-filter:blur(10px);
+  border-bottom:1px solid rgba(255,255,255,0.2);
+}
+body.parent-mode .content{
+  background:transparent;
+}
+body.parent-mode .panel{
+  background:rgba(255,255,255,0.97);
+  backdrop-filter:blur(10px);
+  border:1px solid rgba(255,255,255,0.4);
+  box-shadow:0 8px 32px rgba(15,23,42,0.18), 0 2px 8px rgba(0,0,0,0.04);
+  animation:parentFadeIn .5s cubic-bezier(.2,.8,.2,1) backwards;
+  transition:transform .25s ease, box-shadow .25s ease;
+}
+body.parent-mode .panel:hover{
+  transform:translateY(-2px);
+  box-shadow:0 12px 40px rgba(15,23,42,0.25), 0 4px 12px rgba(0,0,0,0.08);
+}
+body.parent-mode .panel:nth-child(1){animation-delay:0s}
+body.parent-mode .panel:nth-child(2){animation-delay:.08s}
+body.parent-mode .panel:nth-child(3){animation-delay:.16s}
+body.parent-mode .panel:nth-child(4){animation-delay:.24s}
+body.parent-mode .panel:nth-child(5){animation-delay:.32s}
+body.parent-mode .panel:nth-child(6){animation-delay:.4s}
+body.parent-mode .panel:nth-child(n+7){animation-delay:.48s}
+@keyframes parentFadeIn{
+  from{opacity:0;transform:translateY(20px)}
+  to{opacity:1;transform:translateY(0)}
+}
+
+/* Trimester chips — colorful, no more gray */
+.trim-chip{
+  display:inline-flex;align-items:center;gap:.3rem;
+  padding:4px 12px;border-radius:100px;
+  font-size:.75rem;font-weight:700;
+  text-transform:uppercase;letter-spacing:.04em;
+  color:#fff;
+  box-shadow:0 2px 8px rgba(0,0,0,0.15);
+  vertical-align:middle;
+  margin-left:.5rem;
+  transition:transform .2s ease;
+}
+.trim-chip:hover{transform:scale(1.06)}
+.trim-chip.t1{background:linear-gradient(135deg,#3b82f6,#1e40af);box-shadow:0 2px 12px rgba(59,130,246,.4)}
+.trim-chip.t2{background:linear-gradient(135deg,#10b981,#047857);box-shadow:0 2px 12px rgba(16,185,129,.4)}
+.trim-chip.t3{background:linear-gradient(135deg,#f59e0b,#b45309);box-shadow:0 2px 12px rgba(245,158,11,.4)}
+.trim-chip.tx{background:linear-gradient(135deg,#64748b,#334155)}
+.subj-chip{
+  display:inline-flex;align-items:center;gap:.3rem;
+  padding:4px 12px;border-radius:100px;
+  font-size:.72rem;font-weight:600;
+  background:linear-gradient(135deg,#6366f1,#4338ca);
+  color:#fff;
+  vertical-align:middle;
+  margin-left:.4rem;
+}
+
+/* Live update indicator */
+.live-pill{
+  display:inline-flex;align-items:center;gap:.4rem;
+  padding:4px 11px;border-radius:100px;
+  background:linear-gradient(135deg,#10b981,#047857);
+  color:#fff;font-size:.7rem;font-weight:700;
+  text-transform:uppercase;letter-spacing:.05em;
+  box-shadow:0 0 0 0 rgba(16,185,129,0.6);
+  animation:livePulse 2.4s ease-in-out infinite;
+}
+.live-pill .live-dot{
+  width:7px;height:7px;border-radius:50%;
+  background:#fff;
+  animation:liveDotBlink 2.4s ease-in-out infinite;
+}
+@keyframes livePulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(16,185,129,0.5)}
+  50%{box-shadow:0 0 0 8px rgba(16,185,129,0)}
+}
+@keyframes liveDotBlink{
+  0%,100%{opacity:1;transform:scale(1)}
+  50%{opacity:.6;transform:scale(.85)}
+}
+
+/* Flash on update */
+.flash-update{
+  animation:flashGlow 1.2s ease-out;
+}
+@keyframes flashGlow{
+  0%{box-shadow:0 0 0 3px rgba(16,185,129,0.6), 0 8px 32px rgba(15,23,42,0.18)}
+  100%{box-shadow:0 0 0 0 rgba(16,185,129,0), 0 8px 32px rgba(15,23,42,0.18)}
+}
+
+/* Parent grades table styling */
+body.parent-mode .grades-table th{
+  background:linear-gradient(135deg,#1e293b,#334155);
+  font-size:.74rem;
+}
+body.parent-mode .grades-table th .trim-chip{margin-left:0}
+body.parent-mode .grades-table th.final{
+  background:linear-gradient(135deg,#10b981,#047857);
+}
+body.parent-mode .grades-table td.final{
+  background:linear-gradient(180deg,#ecfdf5,#d1fae5);
+}
+body.parent-mode .grades-table .final-chip{
+  background:linear-gradient(135deg,#10b981,#047857);
+  color:#fff;
+  box-shadow:0 2px 8px rgba(16,185,129,0.35);
+  font-size:.95rem;padding:5px 14px;
+}
+body.parent-mode .grades-table td.num.low{
+  background:#fee2e2;
+  color:#991b1b;
+  font-weight:700;
+}
+
+/* Parent stat cards */
+body.parent-mode .stat{
+  background:rgba(255,255,255,0.97);
+  backdrop-filter:blur(10px);
+  border:none;
+  box-shadow:0 6px 20px rgba(15,23,42,0.12);
+  transition:transform .25s ease;
+}
+body.parent-mode .stat:hover{transform:translateY(-3px) scale(1.02)}
+body.parent-mode .stat .value{
+  background:linear-gradient(135deg,#3b82f6,#7e22ce);
+  -webkit-background-clip:text;
+  background-clip:text;
+  -webkit-text-fill-color:transparent;
+}
+body.parent-mode .stat.green .value{background:linear-gradient(135deg,#10b981,#047857);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+body.parent-mode .stat.orange .value{background:linear-gradient(135deg,#f59e0b,#b45309);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+body.parent-mode .stat.red .value{background:linear-gradient(135deg,#ef4444,#991b1b);-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+
+/* Section headers in parent mode */
+body.parent-mode .panel h3{
+  font-size:1.08rem;
+}
+
+/* Smooth tab switching */
+body.parent-mode .tab.active{
+  background:linear-gradient(180deg,transparent 60%,rgba(59,130,246,0.08) 100%);
+}
 </style>
 </head>
 <body>
@@ -381,14 +541,44 @@ function subscribeFirebase(){
       suppressSync = true;
       portal.materials = v.materials || [];
       portal.exams = v.exams || [];
-      portal.calif = v.calif || null;
+      // Only overwrite calif from portal/data if calificaciones/data hasn't pushed yet
+      if(v.calif && !portal._califFromRegistro) portal.calif = v.calif;
       localStorage.setItem(STORE_KEY, JSON.stringify(portal));
       suppressSync = false;
       if(session && (session.role==='teacher' || session.role==='student' || session.role==='parent')){
-        // Re-render current view
         if(session.role==='teacher') renderTeacherContent();
         else if(session.role==='student') renderStudentContent();
         else if(session.role==='parent') renderParentContent();
+      }
+    }
+  });
+  // ── REAL-TIME from Registro de Calificaciones ──
+  // Index.html publica los datos completos en calificaciones/data
+  // cuando guarda. Si está configurado al MISMO Firebase project, los
+  // padres/alumnos ven los cambios en vivo sin recargar la página.
+  fbDb.ref('calificaciones/data').on('value', snap=>{
+    const v = snap.val();
+    if(v && v.groups && Array.isArray(v.groups)){
+      const isFirstLoad = !portal.calif;
+      suppressSync = true;
+      portal.calif = {
+        groups: v.groups,
+        importedAt: new Date().toISOString(),
+        _liveSync: true
+      };
+      portal._califFromRegistro = true;
+      localStorage.setItem(STORE_KEY, JSON.stringify(portal));
+      suppressSync = false;
+      if(session){
+        if(session.role==='parent') {
+          renderParentContent();
+          if(!isFirstLoad) flashUpdate();
+        }
+        else if(session.role==='student') {
+          renderStudentContent();
+          if(!isFirstLoad) flashUpdate();
+        }
+        else if(session.role==='teacher') renderTeacherContent();
       }
     }
   });
@@ -406,6 +596,19 @@ function subscribeFirebase(){
       portal.examResults = [];
     }
   });
+}
+
+// Live flash when remote data updates
+function flashUpdate(){
+  toast('📊 Datos actualizados en vivo','success');
+  // Pulse all visible panels
+  setTimeout(()=>{
+    document.querySelectorAll('.content .panel').forEach(p=>{
+      p.classList.remove('flash-update');
+      void p.offsetWidth; // restart animation
+      p.classList.add('flash-update');
+    });
+  }, 30);
 }
 
 function syncToFirebase(immediate){
@@ -568,6 +771,7 @@ function loginParent(){
 
 function logout(){
   session = null;
+  document.body.classList.remove('parent-mode');
   document.getElementById('app').classList.add('hidden');
   document.getElementById('landing').classList.remove('hidden');
   ['tUser','tPass','sCode','pCode'].forEach(id=>{ const e=document.getElementById(id); if(e) e.value=''; });
@@ -577,6 +781,7 @@ function logout(){
 function showApp(){
   document.getElementById('landing').classList.add('hidden');
   document.getElementById('app').classList.remove('hidden');
+  document.body.classList.toggle('parent-mode', session.role==='parent');
   document.getElementById('userLabel').textContent = session.label;
   if(session.role==='teacher'){
     document.getElementById('brandIcon').textContent = '👨‍🏫';
@@ -589,7 +794,23 @@ function showApp(){
   } else {
     document.getElementById('brandIcon').textContent = '👪';
     document.getElementById('brandText').textContent = 'Portal Padres';
+    // Append live indicator after username for parent mode
+    const ul = document.getElementById('userLabel');
+    if(ul && !document.getElementById('liveIndicator')){
+      const live = document.createElement('span');
+      live.id = 'liveIndicator';
+      live.className = 'live-pill';
+      live.style.marginLeft = '.6rem';
+      live.innerHTML = '<span class="live-dot"></span>EN VIVO';
+      live.title = 'Las calificaciones se actualizan automáticamente cuando el maestro las modifica';
+      ul.parentNode.insertBefore(live, ul.nextSibling);
+    }
     renderParentTabs();
+  }
+  // Remove live indicator if not parent
+  if(session.role !== 'parent'){
+    const li = document.getElementById('liveIndicator');
+    if(li) li.remove();
   }
 }
 
@@ -645,7 +866,22 @@ function viewCalif(){
         </div>
       </div>`;
   }
+  const isLive = portal._califFromRegistro || (portal.calif && portal.calif._liveSync);
   return `
+    <div class="panel" style="background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1.5px solid #3b82f6">
+      <h3 style="color:#1e40af">⚡ Sincronización en tiempo real ${isLive?'<span class="live-pill" style="margin-left:.5rem"><span class="live-dot"></span>ACTIVA</span>':'<span style="color:#94a3b8;font-size:.85rem;font-weight:500">(no configurada)</span>'}</h3>
+      ${isLive
+        ? `<p class="sub">¡Excelente! Las calificaciones se sincronizan automáticamente entre tu Registro y el Portal. Cuando guardes una calificación en Index.html, los padres la verán en su pantalla en pocos segundos sin necesidad de recargar.</p>`
+        : `<p class="sub">Cuando se configura, los padres ven las calificaciones <strong>en vivo</strong> en cuanto guardas en Index.html. Para activarla:</p>
+           <ol style="margin:.4rem 0 .6rem 1.2rem;font-size:.85rem;color:var(--ink2);line-height:1.6">
+             <li>Abre tu <strong>Index.html</strong> (Registro de Calificaciones).</li>
+             <li>Ve a <strong>⚙️ Ajustes → ☁️ Firebase</strong>.</li>
+             <li>Pega <strong>la misma configuración</strong> que pegaste en este Portal (apiKey, databaseURL, etc. del proyecto <code>portal-escolar-de-informatica</code>).</li>
+             <li>Guarda y verifica que el indicador de Firebase del Index se ponga en verde.</li>
+             <li>En la consola de Firebase, en <strong>Realtime Database → Reglas</strong>, asegúrate de tener: <code style="display:block;background:#fff;padding:.5rem;border-radius:6px;margin-top:.3rem;font-size:.78rem">{"rules":{"portal":{".read":true,".write":true},"calificaciones":{".read":true,".write":true}}}</code></li>
+             <li>Guarda una calificación en el Index — debería aparecer al instante en este Portal sin recargar.</li>
+           </ol>`}
+    </div>
     <div class="panel">
       <h3>📊 Vincular con Registro de Calificaciones</h3>
       <p class="sub">Importa el archivo JSON exportado desde tu Registro de Calificaciones. Esto sincroniza alumnos, calificaciones, conducta y entregas para que los padres y alumnos puedan consultarlos.</p>
@@ -1664,10 +1900,12 @@ function renderParentGrades(groups){
     const avg = calcAvgForStudent(g, s.id);
     const avgStr = avg!==null ? avg.toFixed(1) : '—';
     const grado = gradoLabel(g.grado), grupo = grupoLabel(parseGrupoLetter(g.name));
-    const trim = g.trimestre ? `Trimestre ${g.trimestre}` : '';
+    const trimNum = g.trimestre || 'x';
+    const trimChip = `<span class="trim-chip t${trimNum}">Trim. ${g.trimestre || '—'}</span>`;
+    const subjChip = `<span class="subj-chip">${grado} ${grupo}</span>`;
     html += `
       <div class="panel">
-        <h3>📚 ${escHtml(g.name)} <span style="font-weight:400;color:var(--muted);font-size:.85rem">${grado} ${grupo} ${trim?'· '+trim:''}</span></h3>
+        <h3>📚 ${escHtml(g.name)} ${subjChip} ${trimChip}</h3>
         <div class="grades-wrap"><table class="grades-table">
           <thead><tr>
             <th style="width:38px">#</th>
@@ -1737,9 +1975,11 @@ function renderParentConduct(groups){
     const lev = c.level || 0;
     if(lev < 3) return; // Only show bad conduct as requested
     anyBad = true;
+    const trimNum = g.trimestre || 'x';
+    const trimChip = `<span class="trim-chip t${trimNum}">Trim. ${g.trimestre || '—'}</span>`;
     const incidents = (c.incidents||[]).map(i=>`<div class="item"><div class="i-icon">📌</div><div class="i-body"><div class="i-title">${escHtml(i.text)}</div><div class="i-meta"><span>📅 ${escHtml(i.date)}</span></div></div></div>`).join('');
     html += `<div class="panel">
-      <h3>📚 ${escHtml(g.name)} <span style="font-weight:400;color:${cstyles[lev]};font-size:.85rem">${clabels[lev]}</span></h3>
+      <h3>📚 ${escHtml(g.name)} ${trimChip} <span style="font-weight:600;color:${cstyles[lev]};font-size:.85rem;margin-left:.5rem">${clabels[lev]}</span></h3>
       ${incidents?`<div class="item-list">${incidents}</div>`:'<p style="color:var(--muted)">Sin incidentes detallados</p>'}
     </div>`;
   });
@@ -1784,9 +2024,9 @@ function renderParentSummary(groups){
       <div class="grades-wrap"><table class="grades-table">
         <thead><tr>
           <th>Materia</th>
-          <th class="num" style="min-width:60px">Trim. 1</th>
-          <th class="num" style="min-width:60px">Trim. 2</th>
-          <th class="num" style="min-width:60px">Trim. 3</th>
+          <th class="num" style="min-width:80px"><span class="trim-chip t1">Trim. 1</span></th>
+          <th class="num" style="min-width:80px"><span class="trim-chip t2">Trim. 2</span></th>
+          <th class="num" style="min-width:80px"><span class="trim-chip t3">Trim. 3</span></th>
           <th class="final" style="min-width:60px">Final</th>
         </tr></thead>
         <tbody><tr>
