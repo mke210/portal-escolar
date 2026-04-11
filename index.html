@@ -1973,20 +1973,26 @@ function renderParentConduct(groups){
     const c = (g.conduct||{})[s.id];
     if(!c) return;
     const lev = c.level || 0;
-    if(lev < 1) return; // ahora muestra TODOS los niveles registrados
+    if(lev < 1) return;
     any = true;
     const trimNum = g.trimestre || 'x';
     const trimChip = `<span class="trim-chip t${trimNum}">Trim. ${g.trimestre || '—'}</span>`;
-    const incidents = (c.incidents||[]).map(i=>`<div class="item"><div class="i-icon">📌</div><div class="i-body"><div class="i-title">${escHtml(i.text)}</div><div class="i-meta"><span>📅 ${escHtml(i.date)}</span></div></div></div>`).join('');
+    // Normalizar incidents: puede venir como array, objeto (Firebase) o undefined
+    let incidentsList = [];
+    if(Array.isArray(c.incidents)) incidentsList = c.incidents;
+    else if(c.incidents && typeof c.incidents === 'object') incidentsList = Object.values(c.incidents);
+    const incidentsHtml = incidentsList
+      .filter(i => i && (i.text || i.date))
+      .map(i => `<div class="item"><div class="i-icon">📌</div><div class="i-body"><div class="i-title">${escHtml(i.text||'(sin descripción)')}</div><div class="i-meta"><span>📅 ${escHtml(i.date||'—')}</span></div></div></div>`)
+      .join('');
     html += `<div class="panel">
       <h3>📚 ${escHtml(g.name)} ${trimChip} <span style="font-weight:600;color:${cstyles[lev]};font-size:.85rem;margin-left:.5rem">${clabels[lev]}</span></h3>
-      ${incidents?`<div class="item-list">${incidents}</div>`:'<p style="color:var(--muted);font-size:.85rem">Sin incidentes detallados — solo nivel general registrado</p>'}
+      ${incidentsHtml ? `<div class="item-list">${incidentsHtml}</div>` : '<p style="color:var(--muted);font-size:.85rem">Solo nivel general registrado, sin incidentes detallados.</p>'}
     </div>`;
   });
   if(!any) html += `<div class="empty"><div class="big">⭐</div><p>Sin registros de conducta todavía.</p></div>`;
   return html;
 }
-
 function renderParentSummary(groups){
   // Group by group name (removes trimester distinction) to show 3 trimesters per materia
   const byName = {};
