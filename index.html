@@ -1962,36 +1962,117 @@ function renderParentTasks(groups){
   return `<div class="panel"><h3>📋 Reporte de tareas</h3><p class="sub">Estado de entrega de actividades</p></div>${stats}${detail||`<div class="empty"><div class="big">📋</div><p>Aún no hay reportes de entrega registrados.</p></div>`}`;
 }
 
-function renderParentConduct(groups){
-  const clabels = ['','⭐ Excelente','⚠️ Regular','🔶 Mala conducta','🔴 Muy grave'];
-  const cstyles = ['','#2a7a4b','#d68a2a','#c94444','#8b0000'];
-  let html = `<div class="panel"><h3>⚠️ Reporte de conducta</h3><p class="sub">Registros del maestro</p></div>`;
-  let any = false;
+function renderParentTasks(groups){
+  // Función auxiliar: extraer fecha de una actividad (createdAt si existe, si no del id)
+  function fechaDeActividad(a){
+    if(a.createdAt){
+      try{ return new Date(a.createdAt); }catch(e){}
+    }
+    // Fallback: el id se generó con Date.now().toString(36) — extraerlo
+    if(a.id && typeof a.id === 'string'){
+      const ms = parseInt(a.id.split(/[^a-z0-9]/i)[0], 36);
+      if(!isNaN(ms) && ms > 1000000000000) return new Date(ms);
+    }
+    return null;
+  }
+  function fmtFecha(d){
+    if(!d) return '—';
+    return d.toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'});
+  }
+
+  let entregado=0, tarde=0, pendiente=0, total=0;
+  const filas = [];
+
   groups.forEach(g=>{
     const s = getStudentInGroup(g);
     if(!s) return;
-    const c = (g.conduct||{})[s.id];
-    if(!c) return;
-    const lev = c.level || 0;
-    if(lev < 1) return;
-    any = true;
     const trimNum = g.trimestre || 'x';
-    const trimChip = `<span class="trim-chip t${trimNum}">Trim. ${g.trimestre || '—'}</span>`;
-    // Normalizar incidents: puede venir como array, objeto (Firebase) o undefined
-    let incidentsList = [];
-    if(Array.isArray(c.incidents)) incidentsList = c.incidents;
-    else if(c.incidents && typeof c.incidents === 'object') incidentsList = Object.values(c.incidents);
-    const incidentsHtml = incidentsList
-      .filter(i => i && (i.text || i.date))
-      .map(i => `<div class="item"><div class="i-icon">📌</div><div class="i-body"><div class="i-title">${escHtml(i.text||'(sin descripción)')}</div><div class="i-meta"><span>📅 ${escHtml(i.date||'—')}</span></div></div></div>`)
-      .join('');
-    html += `<div class="panel">
-      <h3>📚 ${escHtml(g.name)} ${trimChip} <span style="font-weight:600;color:${cstyles[lev]};font-size:.85rem;margin-left:.5rem">${clabels[lev]}</span></h3>
-      ${incidentsHtml ? `<div class="item-list">${incidentsHtml}</div>` : '<p style="color:var(--muted);font-size:.85rem">Solo nivel general registrado, sin incidentes detallados.</p>'}
-    </div>`;
+    const activities = g.activities||[];
+    activities.forEach(a=>{
+      const key = s.id+'_'+a.id;
+      const grade = (g.grades||{})[key];
+      const hw = (g.hwStatus||{})[key] || {};
+      const st = hw.status || '';
+      total++;
+      if(st==='entregado') entregado++;
+      else if(st==='tarde') tarde++;
+      else if(st==='pendiente') pendiente++;
+      const fecha = fechaDeActividad(a);
+      filas.push({
+        nombre: a.name,
+        materia: g.name,
+        trimNum,
+        trim: g.trimestre || '—',
+        fecha,
+        fechaStr: fmtFecha(fecha),
+        grade,
+        status: st,
+        note: hw.note || '',
+        ts: fecha ? fecha.getTime() : 0
+      });
+    });
   });
-  if(!any) html += `<div class="empty"><div class="big">⭐</div><p>Sin registros de conducta todavía.</p></div>`;
-  return html;
+
+  // Ordenar por fecha ascendente (más antiguas primero, recientes al final)
+  filas.sort((a,b)=> a.ts - b.ts);
+
+  const stats = `<div class="stats-grid">
+    <div class="stat green"><div class="label">📚 Total actividades</div><div class="value">${total}</div></div>
+    <div class="stat green"><div class="label">✅ Entregadas</div><div class="value">${entregado}</div></div>
+    <div class="stat orange"><div class="label">⏰ Tarde</div><div class="value">${tarde}</div></div>
+    <div class="stat red"><div class="label">❌ No entregadas</div><div class="value">${pendiente}</div></div>
+  </div>`;
+
+  if(!filas.length){
+    return `<div class="panel"><h3>📋 Reporte de tareas</h3><p class="sub">Aún no hay actividades registradas.</p></div>${stats}`;
+  }
+
+  const filasHtml = filas.map(f=>{
+    let gradeDisplay = '—', gradeStyle = 'color:#bbb';
+    if(f.grade === 'NE'){
+      gradeDisplay = 'NE'; gradeStyle = 'background:#ffeaea;color:#c8422a;padding:2px 9px;border-radius:100px;font-weight:700';
+    } else if(typeof f.grade === 'string' && f.grade.startsWith('T:')){
+      const n = f.grade.slice(2);
+      gradeDisplay = n ? `⏰ ${n}` : '⏰';
+      gradeStyle = 'background:#ffe8d8;color:#7a3a00;padding:2px 9px;border-radius:100px;font-weight:700';
+    } else if(typeof f.grade === 'string' && f.grade.startsWith('IN:')){
+      const n = f.grade.slice(3);
+      gradeDisplay = n ? `🏥 ${n}` : '🏥';
+      gradeStyle = 'background:#ecdcf5;color:#5a2d7a;padding:2px 9px;border-radius:100px;font-weight:700';
+    } else if(f.grade !== undefined && f.grade !== null && f.grade !== ''){
+      gradeDisplay = f.grade;
+      const num = parseFloat(f.grade);
+      gradeStyle = !isNaN(num) && num < 6
+        ? 'background:#ffeaea;color:#c8422a;padding:2px 9px;border-radius:100px;font-weight:700'
+        : 'background:#d8f0df;color:#2a7a4b;padding:2px 9px;border-radius:100px;font-weight:700';
+    }
+    const stIcon = f.status==='entregado'?'✅':f.status==='tarde'?'⏰':f.status==='pendiente'?'❌':'';
+    const stLabel = f.status==='entregado'?'Entregado':f.status==='tarde'?'Tarde':f.status==='pendiente'?'No entregado':'—';
+    return `<tr>
+      <td style="white-space:nowrap;font-size:.78rem;color:var(--muted)">${escHtml(f.fechaStr)}</td>
+      <td><strong>${escHtml(f.nombre)}</strong>${f.note?`<div style="font-size:.75rem;color:var(--muted);margin-top:.15rem">📝 ${escHtml(f.note)}</div>`:''}</td>
+      <td><span class="subj-chip">${escHtml(f.materia)}</span> <span class="trim-chip t${f.trimNum}">T${f.trim}</span></td>
+      <td style="text-align:center"><span style="${gradeStyle}">${gradeDisplay}</span></td>
+      <td style="text-align:center;font-size:.82rem">${stIcon} ${stLabel}</td>
+    </tr>`;
+  }).join('');
+
+  return `
+    <div class="panel"><h3>📋 Reporte de tareas y actividades</h3><p class="sub">Ordenadas por fecha de creación · de la más antigua a la más reciente</p></div>
+    ${stats}
+    <div class="panel">
+      <div class="grades-wrap"><table class="grades-table">
+        <thead><tr>
+          <th style="min-width:90px">Fecha</th>
+          <th>Actividad</th>
+          <th>Materia</th>
+          <th style="text-align:center">Calif.</th>
+          <th style="text-align:center">Entrega</th>
+        </tr></thead>
+        <tbody>${filasHtml}</tbody>
+      </table></div>
+    </div>
+  `;
 }
 function renderParentSummary(groups){
   // Group by group name (removes trimester distinction) to show 3 trimesters per materia
