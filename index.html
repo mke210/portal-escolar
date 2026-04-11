@@ -1965,25 +1965,25 @@ function renderParentTasks(groups){
 function renderParentConduct(groups){
   const clabels = ['','⭐ Excelente','⚠️ Regular','🔶 Mala conducta','🔴 Muy grave'];
   const cstyles = ['','#2a7a4b','#d68a2a','#c94444','#8b0000'];
-  let html = `<div class="panel"><h3>⚠️ Reporte de conducta</h3><p class="sub">Incidentes registrados por el maestro</p></div>`;
-  let anyBad = false;
+  let html = `<div class="panel"><h3>⚠️ Reporte de conducta</h3><p class="sub">Registros del maestro</p></div>`;
+  let any = false;
   groups.forEach(g=>{
     const s = getStudentInGroup(g);
     if(!s) return;
     const c = (g.conduct||{})[s.id];
     if(!c) return;
     const lev = c.level || 0;
-    if(lev < 3) return; // Only show bad conduct as requested
-    anyBad = true;
+    if(lev < 1) return; // ahora muestra TODOS los niveles registrados
+    any = true;
     const trimNum = g.trimestre || 'x';
     const trimChip = `<span class="trim-chip t${trimNum}">Trim. ${g.trimestre || '—'}</span>`;
     const incidents = (c.incidents||[]).map(i=>`<div class="item"><div class="i-icon">📌</div><div class="i-body"><div class="i-title">${escHtml(i.text)}</div><div class="i-meta"><span>📅 ${escHtml(i.date)}</span></div></div></div>`).join('');
     html += `<div class="panel">
       <h3>📚 ${escHtml(g.name)} ${trimChip} <span style="font-weight:600;color:${cstyles[lev]};font-size:.85rem;margin-left:.5rem">${clabels[lev]}</span></h3>
-      ${incidents?`<div class="item-list">${incidents}</div>`:'<p style="color:var(--muted)">Sin incidentes detallados</p>'}
+      ${incidents?`<div class="item-list">${incidents}</div>`:'<p style="color:var(--muted);font-size:.85rem">Sin incidentes detallados — solo nivel general registrado</p>'}
     </div>`;
   });
-  if(!anyBad) html += `<div class="empty"><div class="big">⭐</div><p>Sin reportes de mala conducta. ¡Excelente!</p></div>`;
+  if(!any) html += `<div class="empty"><div class="big">⭐</div><p>Sin registros de conducta todavía.</p></div>`;
   return html;
 }
 
