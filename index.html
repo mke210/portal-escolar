@@ -1842,15 +1842,30 @@ function showExamDone(id){
 ═══════════════════════════════════════════ */
 let parentTab = 'grades';
 
-function renderParentTabs(){
+ffunction renderParentTabs(){
+  // Calcular si hay conducta nueva (buena o mala) para el icono de aviso
+  const groups = getStudentGroups();
+  let conductBadge = '';
+  let hasBuena = false, hasMala = false;
+  groups.forEach(g=>{
+    const s = getStudentInGroup(g);
+    if(!s) return;
+    const c = (g.conduct||{})[s.id];
+    if(!c) return;
+    const lev = c.level || 0;
+    if(lev === 1) hasBuena = true;       // Excelente
+    else if(lev >= 3) hasMala = true;     // Mala o muy grave
+  });
+  if(hasMala) conductBadge = ' <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#ef4444;box-shadow:0 0 8px #ef4444;animation:livePulse 2s ease-in-out infinite;vertical-align:middle;margin-left:.3rem"></span>';
+  else if(hasBuena) conductBadge = ' <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#10b981;box-shadow:0 0 8px #10b981;animation:livePulse 2s ease-in-out infinite;vertical-align:middle;margin-left:.3rem"></span>';
+
   const tabs = [
     {id:'grades', label:'📊 Calificaciones'},
     {id:'tasks', label:'📋 Tareas'},
-    {id:'conduct', label:'⚠️ Conducta'},
+    {id:'conduct', label:'⚠️ Conducta' + conductBadge},
     {id:'summary', label:'🏆 Resumen final'}
   ];
   document.getElementById('tabs').innerHTML = tabs.map(t=>`<button class="tab ${parentTab===t.id?'active':''}" onclick="setParentTab('${t.id}')">${t.label}</button>`).join('');
-  renderParentContent();
 }
 function setParentTab(id){ parentTab=id; renderParentContent(); renderParentTabs(); }
 
@@ -1892,9 +1907,77 @@ function renderParentContent(){
 }
 
 function renderParentGrades(groups){
-  // Show one table per group (each trimester is a separate group in the Registro)
-  let html = `<div class="panel"><h3>📊 Calificaciones de ${escHtml(session.studentName)}</h3><p class="sub">Sólo lectura · datos del maestro</p></div>`;
+ function changeTrimSel(val){
+  if(!session) return;
+  session._trimSel = val;
+  renderParentContent();
+}
+  // Agrupar por trimestre
+  const porTrim = {'1':[], '2':[], '3':[], 'x':[]};
   groups.forEach(g=>{
+    const t = g.trimestre || 'x';
+    if(porTrim[t]) porTrim[t].push(g);
+    else porTrim['x'].push(g);
+  });
+
+  // Determinar qué trimestre mostrar (el primero con datos por defecto)
+  if(!session._trimSel){
+    if(porTrim['1'].length) session._trimSel = '1';
+    else if(porTrim['2'].length) session._trimSel = '2';
+    else if(porTrim['3'].length) session._trimSel = '3';
+    else session._trimSel = 'todos';
+  }
+  const sel = session._trimSel;
+
+  // Selector de trimestre
+  const labels = {'1':'1° Trimestre','2':'2° Trimestre','3':'3° Trimestre','todos':'Ver todos los trimestres'};
+  const selectorHtml = `
+    <div class="panel" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+      <h3 style="margin:0;flex:1;min-width:200px">📊 Calificaciones de ${escHtml(session.studentName)}</h3>
+      <div style="display:flex;align-items:center;gap:.6rem">
+        <label style="font-size:.78rem;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em">Filtrar:</label>
+        <select onchange="changeTrimSel(this.value)" style="padding:9px 14px;border:2px solid var(--accent2);border-radius:9px;background:#fff;font-family:inherit;font-size:.9rem;font-weight:600;color:var(--ink);cursor:pointer;outline:none">
+          ${porTrim['1'].length?`<option value="1" ${sel==='1'?'selected':''}>📘 1° Trimestre</option>`:''}
+          ${porTrim['2'].length?`<option value="2" ${sel==='2'?'selected':''}>📗 2° Trimestre</option>`:''}
+          ${porTrim['3'].length?`<option value="3" ${sel==='3'?'selected':''}>📙 3° Trimestre</option>`:''}
+          <option value="todos" ${sel==='todos'?'selected':''}>📚 Ver todos</option>
+        </select>
+      </div>
+    </div>`;
+
+  // Decidir qué grupos mostrar
+  let gruposMostrar = [];
+  if(sel === 'todos') gruposMostrar = groups;
+  else gruposMostrar = porTrim[sel] || [];
+
+  if(!gruposMostrar.length){
+    return selectorHtml + `<div class="empty"><div class="big">📭</div><p>No hay calificaciones registradas en ${labels[sel]||'este trimestre'}.</p></div>`;
+  }
+
+  // Función para chip de calificación con código de colores nuevo
+  function chipCalif(v){
+    if(v === undefined || v === null || v === '') return `<span style="color:#bbb">—</span>`;
+    if(v === 'NE') return `<span style="background:#fee2e2;color:#991b1b;padding:3px 10px;border-radius:100px;font-weight:800;font-size:.78rem;border:1.5px solid #ef4444">❌ NE</span>`;
+    if(typeof v === 'string' && v.startsWith('T:')){
+      const n = v.slice(2);
+      return `<span style="background:#fef3c7;color:#92400e;padding:3px 10px;border-radius:100px;font-weight:800;font-size:.78rem;border:1.5px solid #f59e0b">⏰${n?' '+n:''}</span>`;
+    }
+    if(typeof v === 'string' && v.startsWith('IN:')){
+      const n = v.slice(3);
+      return `<span style="background:#ede9fe;color:#5b21b6;padding:3px 10px;border-radius:100px;font-weight:700;font-size:.78rem;border:1.5px solid #8b5cf6">🏥${n?' '+n:''}</span>`;
+    }
+    const num = parseFloat(v);
+    if(!isNaN(num)){
+      if(num >= 9) return `<span style="background:#d1fae5;color:#065f46;padding:3px 11px;border-radius:100px;font-weight:800;font-size:.85rem;border:1.5px solid #10b981">✨ ${v}</span>`;
+      if(num >= 6) return `<span style="background:#dbeafe;color:#1e40af;padding:3px 10px;border-radius:100px;font-weight:700;font-size:.8rem;border:1.5px solid #3b82f6">${v}</span>`;
+      return `<span style="background:#fee2e2;color:#991b1b;padding:3px 10px;border-radius:100px;font-weight:800;font-size:.8rem;border:1.5px solid #ef4444">${v}</span>`;
+    }
+    return `<span style="font-weight:600">${escHtml(String(v))}</span>`;
+  }
+
+  let html = selectorHtml;
+
+  gruposMostrar.forEach(g=>{
     const s = getStudentInGroup(g);
     if(!s) return;
     const avg = calcAvgForStudent(g, s.id);
@@ -1903,12 +1986,21 @@ function renderParentGrades(groups){
     const trimNum = g.trimestre || 'x';
     const trimChip = `<span class="trim-chip t${trimNum}">Trim. ${g.trimestre || '—'}</span>`;
     const subjChip = `<span class="subj-chip">${grado} ${grupo}</span>`;
+
+    // Color del promedio final
+    let avgChipStyle = 'background:#f3f4f6;color:#6b7280';
+    if(avg !== null){
+      if(avg >= 9) avgChipStyle = 'background:linear-gradient(135deg,#10b981,#047857);color:#fff;box-shadow:0 2px 10px rgba(16,185,129,.4)';
+      else if(avg >= 6) avgChipStyle = 'background:linear-gradient(135deg,#3b82f6,#1e40af);color:#fff;box-shadow:0 2px 10px rgba(59,130,246,.4)';
+      else avgChipStyle = 'background:linear-gradient(135deg,#ef4444,#991b1b);color:#fff;box-shadow:0 2px 10px rgba(239,68,68,.4)';
+    }
+
     html += `
       <div class="panel">
         <h3>📚 ${escHtml(g.name)} ${subjChip} ${trimChip}</h3>
         <div class="grades-wrap"><table class="grades-table">
           <thead><tr>
-            <th style="width:38px">#</th>
+            <th style="width:40px">#</th>
             <th>Alumno</th>
             ${(g.activities||[]).map(a=>`<th class="num">${escHtml(a.name)}</th>`).join('')}
             <th class="final">Final</th>
@@ -1918,14 +2010,27 @@ function renderParentGrades(groups){
             <td><strong>${escHtml(s.name)}</strong></td>
             ${(g.activities||[]).map(a=>{
               const v = (g.grades||{})[s.id+'_'+a.id];
-              const cls = (v!==undefined && v!=='' && parseFloat(v)<6)?'low':'';
-              return `<td class="num ${cls}">${v!==undefined && v!==null && v!==''?v:'—'}</td>`;
+              return `<td class="num">${chipCalif(v)}</td>`;
             }).join('')}
-            <td class="final"><span class="final-chip">${avgStr}</span></td>
+            <td class="final"><span style="display:inline-block;padding:5px 16px;border-radius:100px;font-weight:800;font-size:1rem;${avgChipStyle}">${avgStr}</span></td>
           </tr></tbody>
         </table></div>
       </div>`;
   });
+
+  // Leyenda de colores
+  html += `
+    <div class="panel" style="background:linear-gradient(135deg,#f8fafc,#f1f5f9);border:1.5px solid #e2e8f0">
+      <h3 style="font-size:.85rem">🎨 Leyenda de colores</h3>
+      <div style="display:flex;gap:.8rem;flex-wrap:wrap;font-size:.78rem;color:var(--ink2)">
+        <span style="display:inline-flex;align-items:center;gap:.4rem"><span style="background:#d1fae5;color:#065f46;padding:3px 11px;border-radius:100px;font-weight:800;border:1.5px solid #10b981">✨ 9-10</span> Excelente</span>
+        <span style="display:inline-flex;align-items:center;gap:.4rem"><span style="background:#dbeafe;color:#1e40af;padding:3px 10px;border-radius:100px;font-weight:700;border:1.5px solid #3b82f6">6-8</span> Aprobado</span>
+        <span style="display:inline-flex;align-items:center;gap:.4rem"><span style="background:#fee2e2;color:#991b1b;padding:3px 10px;border-radius:100px;font-weight:800;border:1.5px solid #ef4444">&lt; 6</span> Reprobado</span>
+        <span style="display:inline-flex;align-items:center;gap:.4rem"><span style="background:#fef3c7;color:#92400e;padding:3px 10px;border-radius:100px;font-weight:800;border:1.5px solid #f59e0b">⏰ T</span> Retardo</span>
+        <span style="display:inline-flex;align-items:center;gap:.4rem"><span style="background:#fee2e2;color:#991b1b;padding:3px 10px;border-radius:100px;font-weight:800;border:1.5px solid #ef4444">❌ NE</span> No entregó</span>
+      </div>
+    </div>`;
+
   return html;
 }
 
@@ -1963,40 +2068,51 @@ function renderParentTasks(groups){
 }
 
 function renderParentTasks(groups){
-  // Función auxiliar: extraer fecha de una actividad (createdAt si existe, si no del id)
+  // Extrae fecha y hora de la actividad: usa createdAt si existe, si no decodifica del id
   function fechaDeActividad(a){
     if(a.createdAt){
-      try{ return new Date(a.createdAt); }catch(e){}
+      try{ const d = new Date(a.createdAt); if(!isNaN(d.getTime())) return d; }catch(e){}
     }
-    // Fallback: el id se generó con Date.now().toString(36) — extraerlo
     if(a.id && typeof a.id === 'string'){
       const ms = parseInt(a.id.split(/[^a-z0-9]/i)[0], 36);
       if(!isNaN(ms) && ms > 1000000000000) return new Date(ms);
     }
     return null;
   }
-  function fmtFecha(d){
+  function fmtFechaHora(d, exacta){
     if(!d) return '—';
-    return d.toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'});
+    const fecha = d.toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'});
+    const hora = d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+    return exacta ? `${fecha} · ${hora}` : `${fecha} · ~${hora}`;
   }
 
-  let entregado=0, tarde=0, pendiente=0, total=0;
+  let entregado=0, tarde=0, pendiente=0, sinReg=0, total=0;
   const filas = [];
 
   groups.forEach(g=>{
     const s = getStudentInGroup(g);
     if(!s) return;
     const trimNum = g.trimestre || 'x';
-    const activities = g.activities||[];
-    activities.forEach(a=>{
+    (g.activities||[]).forEach(a=>{
       const key = s.id+'_'+a.id;
       const grade = (g.grades||{})[key];
       const hw = (g.hwStatus||{})[key] || {};
       const st = hw.status || '';
       total++;
-      if(st==='entregado') entregado++;
-      else if(st==='tarde') tarde++;
-      else if(st==='pendiente') pendiente++;
+
+      // Estado real: si tiene calificación NE/T cuenta como entregado/tarde aunque no haya hwStatus
+      let estadoReal = st;
+      if(!estadoReal){
+        if(grade === 'NE') estadoReal = 'pendiente';
+        else if(typeof grade === 'string' && grade.startsWith('T:')) estadoReal = 'tarde';
+        else if(grade !== undefined && grade !== null && grade !== '' && !(typeof grade === 'string' && grade.startsWith('IN:'))) estadoReal = 'entregado';
+      }
+
+      if(estadoReal==='entregado') entregado++;
+      else if(estadoReal==='tarde') tarde++;
+      else if(estadoReal==='pendiente') pendiente++;
+      else sinReg++;
+
       const fecha = fechaDeActividad(a);
       filas.push({
         nombre: a.name,
@@ -2004,73 +2120,90 @@ function renderParentTasks(groups){
         trimNum,
         trim: g.trimestre || '—',
         fecha,
-        fechaStr: fmtFecha(fecha),
+        fechaStr: fmtFechaHora(fecha, !!a.createdAt),
         grade,
-        status: st,
+        estadoReal,
         note: hw.note || '',
         ts: fecha ? fecha.getTime() : 0
       });
     });
   });
 
-  // Ordenar por fecha ascendente (más antiguas primero, recientes al final)
-  filas.sort((a,b)=> a.ts - b.ts);
+  // Ordenar por fecha — más recientes primero
+  filas.sort((a,b)=> b.ts - a.ts);
 
   const stats = `<div class="stats-grid">
-    <div class="stat green"><div class="label">📚 Total actividades</div><div class="value">${total}</div></div>
+    <div class="stat" style="border-left-color:#3b82f6"><div class="label">📚 Total</div><div class="value">${total}</div><div class="sub">actividades registradas</div></div>
     <div class="stat green"><div class="label">✅ Entregadas</div><div class="value">${entregado}</div></div>
-    <div class="stat orange"><div class="label">⏰ Tarde</div><div class="value">${tarde}</div></div>
+    <div class="stat orange"><div class="label">⏰ Con retardo</div><div class="value">${tarde}</div></div>
     <div class="stat red"><div class="label">❌ No entregadas</div><div class="value">${pendiente}</div></div>
   </div>`;
 
   if(!filas.length){
-    return `<div class="panel"><h3>📋 Reporte de tareas</h3><p class="sub">Aún no hay actividades registradas.</p></div>${stats}`;
+    return `<div class="panel"><h3>📋 Reporte de tareas y actividades</h3><p class="sub">Aún no hay actividades registradas para ${escHtml(session.studentName)}.</p></div>${stats}`;
   }
 
-  const filasHtml = filas.map(f=>{
-    let gradeDisplay = '—', gradeStyle = 'color:#bbb';
+  // Pintar cada fila con código de colores: verde=entregado/buena calif, amarillo=tarde, rojo=NE/baja
+  const filasHtml = filas.map((f,idx)=>{
+    let gradeChip = '<span style="color:#bbb">—</span>';
+    let bgRow = idx%2===0 ? 'background:#fafafa' : '';
+
     if(f.grade === 'NE'){
-      gradeDisplay = 'NE'; gradeStyle = 'background:#ffeaea;color:#c8422a;padding:2px 9px;border-radius:100px;font-weight:700';
+      gradeChip = `<span style="background:#fee2e2;color:#991b1b;padding:4px 12px;border-radius:100px;font-weight:800;font-size:.85rem;border:2px solid #ef4444">❌ NE</span>`;
+      bgRow = 'background:linear-gradient(90deg,#fff5f5,transparent)';
     } else if(typeof f.grade === 'string' && f.grade.startsWith('T:')){
       const n = f.grade.slice(2);
-      gradeDisplay = n ? `⏰ ${n}` : '⏰';
-      gradeStyle = 'background:#ffe8d8;color:#7a3a00;padding:2px 9px;border-radius:100px;font-weight:700';
+      gradeChip = `<span style="background:#fef3c7;color:#92400e;padding:4px 12px;border-radius:100px;font-weight:800;font-size:.85rem;border:2px solid #f59e0b">⏰ T${n?' · '+n:''}</span>`;
+      bgRow = 'background:linear-gradient(90deg,#fffbeb,transparent)';
     } else if(typeof f.grade === 'string' && f.grade.startsWith('IN:')){
       const n = f.grade.slice(3);
-      gradeDisplay = n ? `🏥 ${n}` : '🏥';
-      gradeStyle = 'background:#ecdcf5;color:#5a2d7a;padding:2px 9px;border-radius:100px;font-weight:700';
+      gradeChip = `<span style="background:#ede9fe;color:#5b21b6;padding:4px 12px;border-radius:100px;font-weight:800;font-size:.85rem;border:2px solid #8b5cf6">🏥 IN${n?' · '+n:''}</span>`;
     } else if(f.grade !== undefined && f.grade !== null && f.grade !== ''){
-      gradeDisplay = f.grade;
       const num = parseFloat(f.grade);
-      gradeStyle = !isNaN(num) && num < 6
-        ? 'background:#ffeaea;color:#c8422a;padding:2px 9px;border-radius:100px;font-weight:700'
-        : 'background:#d8f0df;color:#2a7a4b;padding:2px 9px;border-radius:100px;font-weight:700';
+      if(!isNaN(num)){
+        if(num >= 9){
+          gradeChip = `<span style="background:#d1fae5;color:#065f46;padding:4px 14px;border-radius:100px;font-weight:800;font-size:.95rem;border:2px solid #10b981">✨ ${f.grade}</span>`;
+          bgRow = 'background:linear-gradient(90deg,#f0fdf4,transparent)';
+        } else if(num >= 6){
+          gradeChip = `<span style="background:#dbeafe;color:#1e40af;padding:4px 12px;border-radius:100px;font-weight:700;font-size:.88rem;border:2px solid #3b82f6">${f.grade}</span>`;
+        } else {
+          gradeChip = `<span style="background:#fee2e2;color:#991b1b;padding:4px 12px;border-radius:100px;font-weight:800;font-size:.88rem;border:2px solid #ef4444">${f.grade}</span>`;
+          bgRow = 'background:linear-gradient(90deg,#fff5f5,transparent)';
+        }
+      } else {
+        gradeChip = `<span style="background:#f3f4f6;padding:4px 10px;border-radius:100px;font-weight:600">${escHtml(f.grade)}</span>`;
+      }
     }
-    const stIcon = f.status==='entregado'?'✅':f.status==='tarde'?'⏰':f.status==='pendiente'?'❌':'';
-    const stLabel = f.status==='entregado'?'Entregado':f.status==='tarde'?'Tarde':f.status==='pendiente'?'No entregado':'—';
-    return `<tr>
-      <td style="white-space:nowrap;font-size:.78rem;color:var(--muted)">${escHtml(f.fechaStr)}</td>
-      <td><strong>${escHtml(f.nombre)}</strong>${f.note?`<div style="font-size:.75rem;color:var(--muted);margin-top:.15rem">📝 ${escHtml(f.note)}</div>`:''}</td>
+
+    const stIcon = f.estadoReal==='entregado'?'<span style="color:#10b981;font-weight:700">✅ Entregada</span>':
+                   f.estadoReal==='tarde'?'<span style="color:#f59e0b;font-weight:700">⏰ Con retardo</span>':
+                   f.estadoReal==='pendiente'?'<span style="color:#ef4444;font-weight:700">❌ No entregada</span>':
+                   '<span style="color:#bbb">— Sin registrar</span>';
+
+    return `<tr style="${bgRow}">
+      <td style="white-space:nowrap;font-size:.78rem;color:var(--ink2);font-weight:600">📅 ${escHtml(f.fechaStr)}</td>
+      <td><strong style="color:var(--ink)">${escHtml(f.nombre)}</strong>${f.note?`<div style="font-size:.74rem;color:var(--muted);margin-top:.2rem;font-style:italic">📝 ${escHtml(f.note)}</div>`:''}</td>
       <td><span class="subj-chip">${escHtml(f.materia)}</span> <span class="trim-chip t${f.trimNum}">T${f.trim}</span></td>
-      <td style="text-align:center"><span style="${gradeStyle}">${gradeDisplay}</span></td>
-      <td style="text-align:center;font-size:.82rem">${stIcon} ${stLabel}</td>
+      <td style="text-align:center">${gradeChip}</td>
+      <td style="text-align:center;font-size:.82rem">${stIcon}</td>
     </tr>`;
   }).join('');
 
   return `
-    <div class="panel"><h3>📋 Reporte de tareas y actividades</h3><p class="sub">Ordenadas por fecha de creación · de la más antigua a la más reciente</p></div>
+    <div class="panel"><h3>📋 Reporte detallado de tareas y actividades</h3><p class="sub">Cada actividad de ${escHtml(session.studentName)} con día, hora, calificación y estado de entrega · ordenadas de la más reciente a la más antigua</p></div>
     ${stats}
     <div class="panel">
       <div class="grades-wrap"><table class="grades-table">
         <thead><tr>
-          <th style="min-width:90px">Fecha</th>
-          <th>Actividad</th>
-          <th>Materia</th>
-          <th style="text-align:center">Calif.</th>
-          <th style="text-align:center">Entrega</th>
+          <th style="min-width:130px">📅 Fecha y hora</th>
+          <th>📚 Actividad</th>
+          <th>Materia / Trim.</th>
+          <th style="text-align:center;min-width:90px">Calif.</th>
+          <th style="text-align:center;min-width:140px">Estado</th>
         </tr></thead>
         <tbody>${filasHtml}</tbody>
       </table></div>
+      <p class="sub" style="margin-top:.8rem;font-size:.75rem">💡 Las fechas con <strong>~</strong> son aproximadas (de actividades creadas antes de esta función). Las nuevas mostrarán fecha y hora exactas.</p>
     </div>
   `;
 }
