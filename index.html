@@ -1763,7 +1763,28 @@ function renderStudentContent(){
 }
 
 function openMaterial(id){
-  function openGameModal(title, htmlContent){
+  const m = portal.materials.find(x=>x.id===id);
+  if(!m) return;
+  if(m.type==='link'){ window.open(m.content, '_blank'); return; }
+  if(m.type==='doc'){
+    const a = document.createElement('a');
+    a.href = m.content; a.download = m.filename || m.title;
+    a.click();
+    return;
+  }
+  if(m.type==='image'){
+    openModal(`
+      <div class="modal-head"><h3>${escHtml(m.title)}</h3><span class="modal-close" onclick="closeModal()">×</span></div>
+      <div class="modal-body" style="text-align:center"><img src="${m.content}" style="max-width:100%;border-radius:8px"></div>
+    `);
+    return;
+  }
+  if(m.type==='game'){
+    openGameModal(m.title, m.content);
+  }
+}
+
+function openGameModal(title, htmlContent){
   const h = document.getElementById('modalHolder');
   const safe = (htmlContent||'').replace(/"/g,'&quot;');
   h.innerHTML = `
@@ -1793,7 +1814,6 @@ function openMaterial(id){
   bg.addEventListener('click', e=>{ if(e.target===bg) closeModal(); });
   _gmSetup();
 }
-
 function gmToggleMax(){
   const m = document.getElementById('gameModal');
   if(!m) return;
@@ -1802,21 +1822,17 @@ function gmToggleMax(){
     m.style.width=''; m.style.height=''; m.style.top=''; m.style.left=''; m.style.transform='';
   }
 }
-
 function _gmSetup(){
   const modal = document.getElementById('gameModal');
   const head = document.getElementById('gmHead');
   if(!modal || !head) return;
-
-  // Drag to move (desde la cabecera)
   let dragging=false, dx=0, dy=0, startL=0, startT=0;
   head.addEventListener('mousedown', e=>{
     if(e.target.closest('.gm-btn')) return;
     if(modal.classList.contains('maximized')) return;
     dragging=true;
     const r = modal.getBoundingClientRect();
-    startL = r.left; startT = r.top;
-    dx = e.clientX; dy = e.clientY;
+    startL = r.left; startT = r.top; dx = e.clientX; dy = e.clientY;
     modal.style.margin='0'; modal.style.position='fixed';
     modal.style.left = startL+'px'; modal.style.top = startT+'px';
     modal.style.transform='none';
@@ -1828,16 +1844,13 @@ function _gmSetup(){
     modal.style.top = (startT + e.clientY - dy)+'px';
   });
   document.addEventListener('mouseup', ()=>{ dragging=false; document.body.style.userSelect=''; });
-
-  // Resize desde las manijas
   modal.querySelectorAll('.gm-resize').forEach(handle=>{
     handle.addEventListener('mousedown', e=>{
       if(modal.classList.contains('maximized')) return;
       e.preventDefault(); e.stopPropagation();
       const dir = handle.dataset.dir;
       const r = modal.getBoundingClientRect();
-      const sx=e.clientX, sy=e.clientY;
-      const sw=r.width, sh=r.height, sl=r.left, st=r.top;
+      const sx=e.clientX, sy=e.clientY, sw=r.width, sh=r.height, sl=r.left, st=r.top;
       modal.style.margin='0'; modal.style.position='fixed'; modal.style.transform='none';
       modal.style.left=sl+'px'; modal.style.top=st+'px';
       document.body.style.userSelect='none';
@@ -1857,30 +1870,6 @@ function _gmSetup(){
     });
   });
 }
-  const m = portal.materials.find(x=>x.id===id);
-  if(!m) return;
-  if(m.type==='link'){
-    window.open(m.content, '_blank');
-    return;
-  }
-  if(m.type==='doc'){
-    // Open base64 as download
-    const a = document.createElement('a');
-    a.href = m.content;
-    a.download = m.filename || m.title;
-    a.click();
-    return;
-  }
-  if(m.type==='image'){
-    openModal(`
-      <div class="modal-head"><h3>${escHtml(m.title)}</h3><span class="modal-close" onclick="closeModal()">×</span></div>
-      <div class="modal-body" style="text-align:center"><img src="${m.content}" style="max-width:100%;border-radius:8px"></div>
-    `);
-    return;
-  }
-  if(m.type==='game'){
-    openGameModal(m.title, m.content);
-  }
 
 // ── EXAM taking ──
 let currentExam = null;
