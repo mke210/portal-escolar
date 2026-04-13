@@ -123,6 +123,31 @@ input,select,textarea{font-family:inherit;font-size:14px}
 .modal-body{padding:1.5rem}
 .modal-close{font-size:1.6rem;color:var(--muted);cursor:pointer;padding:0 .4rem;line-height:1}
 .modal-close:hover{color:var(--red)}
+  /* ── GAME MODAL (resizable & fullscreen) ─────────────────────────────── */
+.game-modal-bg{position:fixed;inset:0;background:rgba(0,0,0,.75);display:flex;align-items:center;justify-content:center;z-index:2000;backdrop-filter:blur(4px)}
+.game-modal{position:relative;background:#fff;border-radius:14px;box-shadow:0 20px 60px rgba(0,0,0,.4);display:flex;flex-direction:column;overflow:hidden;width:90vw;height:85vh;max-width:1400px;min-width:320px;min-height:300px;transition:all .2s ease}
+.game-modal.maximized{width:100vw!important;height:100vh!important;max-width:none;border-radius:0;top:0!important;left:0!important;transform:none!important}
+.game-modal-head{background:var(--ink);color:#fff;padding:.7rem 1rem;display:flex;align-items:center;justify-content:space-between;cursor:move;user-select:none;flex-shrink:0}
+.game-modal-head h3{font-family:'DM Sans',sans-serif;font-weight:600;font-size:1rem;color:#fff;margin:0}
+.game-modal-controls{display:flex;gap:.4rem;align-items:center}
+.gm-btn{background:rgba(255,255,255,.12);color:#fff;border:none;width:32px;height:28px;border-radius:6px;cursor:pointer;font-size:.95rem;transition:background .15s;display:inline-flex;align-items:center;justify-content:center;padding:0}
+.gm-btn:hover{background:rgba(255,255,255,.25)}
+.gm-btn.close:hover{background:var(--red)}
+.game-modal-body{flex:1;overflow:hidden;position:relative;background:#f5f5f5}
+.game-modal-body iframe{width:100%;height:100%;border:none;display:block}
+/* Resize handles (esquinas y bordes) */
+.gm-resize{position:absolute;z-index:10}
+.gm-resize.n{top:-3px;left:10px;right:10px;height:6px;cursor:n-resize}
+.gm-resize.s{bottom:-3px;left:10px;right:10px;height:6px;cursor:s-resize}
+.gm-resize.e{top:10px;bottom:10px;right:-3px;width:6px;cursor:e-resize}
+.gm-resize.w{top:10px;bottom:10px;left:-3px;width:6px;cursor:w-resize}
+.gm-resize.ne{top:-3px;right:-3px;width:14px;height:14px;cursor:ne-resize}
+.gm-resize.nw{top:-3px;left:-3px;width:14px;height:14px;cursor:nw-resize}
+.gm-resize.se{bottom:-3px;right:-3px;width:14px;height:14px;cursor:se-resize}
+.gm-resize.sw{bottom:-3px;left:-3px;width:14px;height:14px;cursor:sw-resize}
+.gm-resize.se::after{content:'';position:absolute;right:3px;bottom:3px;width:8px;height:8px;border-right:2px solid var(--accent);border-bottom:2px solid var(--accent);border-bottom-right-radius:3px}
+.game-modal.maximized .gm-resize{display:none}
+@media(max-width:640px){.game-modal{width:100vw;height:100vh;border-radius:0}.gm-resize{display:none}}
 
 /* ── GRADES TABLE (PARENT/STUDENT VIEW) ─────────────────────────────── */
 .grades-wrap{overflow-x:auto;background:#fff;border-radius:12px;box-shadow:0 2px 12px rgba(0,0,0,.05);margin-bottom:1.2rem}
@@ -1738,6 +1763,100 @@ function renderStudentContent(){
 }
 
 function openMaterial(id){
+  function openGameModal(title, htmlContent){
+  const h = document.getElementById('modalHolder');
+  const safe = (htmlContent||'').replace(/"/g,'&quot;');
+  h.innerHTML = `
+    <div class="game-modal-bg" id="gameModalBg">
+      <div class="game-modal" id="gameModal">
+        <div class="game-modal-head" id="gmHead">
+          <h3>🎮 ${escHtml(title)}</h3>
+          <div class="game-modal-controls">
+            <button class="gm-btn" onclick="gmToggleMax()" title="Maximizar / Restaurar">⛶</button>
+            <button class="gm-btn close" onclick="closeModal()" title="Cerrar">✕</button>
+          </div>
+        </div>
+        <div class="game-modal-body">
+          <iframe srcdoc="${safe}" allowfullscreen></iframe>
+        </div>
+        <div class="gm-resize n" data-dir="n"></div>
+        <div class="gm-resize s" data-dir="s"></div>
+        <div class="gm-resize e" data-dir="e"></div>
+        <div class="gm-resize w" data-dir="w"></div>
+        <div class="gm-resize ne" data-dir="ne"></div>
+        <div class="gm-resize nw" data-dir="nw"></div>
+        <div class="gm-resize se" data-dir="se"></div>
+        <div class="gm-resize sw" data-dir="sw"></div>
+      </div>
+    </div>`;
+  const bg = document.getElementById('gameModalBg');
+  bg.addEventListener('click', e=>{ if(e.target===bg) closeModal(); });
+  _gmSetup();
+}
+
+function gmToggleMax(){
+  const m = document.getElementById('gameModal');
+  if(!m) return;
+  m.classList.toggle('maximized');
+  if(!m.classList.contains('maximized')){
+    m.style.width=''; m.style.height=''; m.style.top=''; m.style.left=''; m.style.transform='';
+  }
+}
+
+function _gmSetup(){
+  const modal = document.getElementById('gameModal');
+  const head = document.getElementById('gmHead');
+  if(!modal || !head) return;
+
+  // Drag to move (desde la cabecera)
+  let dragging=false, dx=0, dy=0, startL=0, startT=0;
+  head.addEventListener('mousedown', e=>{
+    if(e.target.closest('.gm-btn')) return;
+    if(modal.classList.contains('maximized')) return;
+    dragging=true;
+    const r = modal.getBoundingClientRect();
+    startL = r.left; startT = r.top;
+    dx = e.clientX; dy = e.clientY;
+    modal.style.margin='0'; modal.style.position='fixed';
+    modal.style.left = startL+'px'; modal.style.top = startT+'px';
+    modal.style.transform='none';
+    document.body.style.userSelect='none';
+  });
+  document.addEventListener('mousemove', e=>{
+    if(!dragging) return;
+    modal.style.left = (startL + e.clientX - dx)+'px';
+    modal.style.top = (startT + e.clientY - dy)+'px';
+  });
+  document.addEventListener('mouseup', ()=>{ dragging=false; document.body.style.userSelect=''; });
+
+  // Resize desde las manijas
+  modal.querySelectorAll('.gm-resize').forEach(handle=>{
+    handle.addEventListener('mousedown', e=>{
+      if(modal.classList.contains('maximized')) return;
+      e.preventDefault(); e.stopPropagation();
+      const dir = handle.dataset.dir;
+      const r = modal.getBoundingClientRect();
+      const sx=e.clientX, sy=e.clientY;
+      const sw=r.width, sh=r.height, sl=r.left, st=r.top;
+      modal.style.margin='0'; modal.style.position='fixed'; modal.style.transform='none';
+      modal.style.left=sl+'px'; modal.style.top=st+'px';
+      document.body.style.userSelect='none';
+      function onMove(ev){
+        const dx=ev.clientX-sx, dy=ev.clientY-sy;
+        let nw=sw, nh=sh, nl=sl, nt=st;
+        if(dir.includes('e')) nw = Math.max(320, sw+dx);
+        if(dir.includes('s')) nh = Math.max(300, sh+dy);
+        if(dir.includes('w')){ nw = Math.max(320, sw-dx); nl = sl+(sw-nw); }
+        if(dir.includes('n')){ nh = Math.max(300, sh-dy); nt = st+(sh-nh); }
+        modal.style.width=nw+'px'; modal.style.height=nh+'px';
+        modal.style.left=nl+'px'; modal.style.top=nt+'px';
+      }
+      function onUp(){ document.removeEventListener('mousemove',onMove); document.removeEventListener('mouseup',onUp); document.body.style.userSelect=''; }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+  });
+}
   const m = portal.materials.find(x=>x.id===id);
   if(!m) return;
   if(m.type==='link'){
@@ -1760,14 +1879,8 @@ function openMaterial(id){
     return;
   }
   if(m.type==='game'){
-    // Render in iframe via srcdoc
-    const safe = (m.content||'').replace(/"/g,'&quot;');
-    openModal(`
-      <div class="modal-head"><h3>${escHtml(m.title)}</h3><span class="modal-close" onclick="closeModal()">×</span></div>
-      <div class="modal-body" style="padding:0"><iframe srcdoc="${safe}" style="width:100%;height:500px;border:none;border-radius:0 0 14px 14px"></iframe></div>
-    `);
+    openGameModal(m.title, m.content);
   }
-}
 
 // ── EXAM taking ──
 let currentExam = null;
