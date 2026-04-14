@@ -695,50 +695,6 @@ function openModal(html){
 function closeModal(){ document.getElementById('modalHolder').innerHTML=''; }
 
 // ── Grado/Grupo parsing from imported Registro groups ─────────
-/*
- * resolveGrado — obtiene el grado ('1','2','3') de un objeto grupo.
- * Orden de prioridad:
- *   1. Campo explícito g.grado si es 1, 2 o 3 (número o string)
- *   2. Parseo del nombre: "2°A Mate", "3° B", "1A Info", "Grado 2", etc.
- * Retorna string '1'|'2'|'3' o '' si no se detecta.
- */
-function resolveGrado(g){
-  if(!g) return '';
-  // Intento 1 – campo explícito
-  const raw = String(g.grado ?? '').trim();
-  if(/^[123]$/.test(raw)) return raw;
-  // Intento 2 – nombre del grupo (patrones comunes de Registro mexicano)
-  const name = g.name || '';
-  const patterns = [
-    /^([1-3])[°º\s]/,           // "2° A Matemáticas"  "3 B Español"
-    /\b([1-3](?:er|do|ro)?)\s*(?:grado|°)/i, // "2do Grado"
-    /grado\s*([1-3])/i,          // "Grado 3"
-    /([1-3])[°º]([A-Fa-f])/,    // "2°A"
-    /^([1-3])([A-Fa-f])\s/,     // "2A Matemáticas"
-    /([1-3])/                    // último recurso: primer dígito 1-3
-  ];
-  for(const re of patterns){
-    const m = name.match(re);
-    if(m) return m[1].replace(/er|do|ro/i,'');
-  }
-  return '';
-}
-
-/*
- * resolveGrupo — obtiene la letra de grupo (A-F) de un objeto grupo.
- * Orden de prioridad:
- *   1. Campo explícito g.grupo
- *   2. Parseo del nombre del grupo
- */
-function resolveGrupo(g){
-  if(!g) return '';
-  if(g.grupo && /^[A-Fa-f]$/.test(String(g.grupo))) return String(g.grupo).toUpperCase();
-  const name = g.name || '';
-  const m = name.match(/[1-3]°?\s*([A-Fa-f])\b/);
-  return m ? m[1].toUpperCase() : '';
-}
-
-// Alias de compatibilidad
 function parseGrupoLetter(name){
   if(!name) return '';
   const m = name.match(/[1-3]°?\s*([A-Fa-f])/);
@@ -805,14 +761,11 @@ function loginStudent(){
     document.getElementById('sErr').textContent = msg;
     return;
   }
-  // Usar resolveGrado/resolveGrupo: soportan campo explícito Y parseo del nombre del grupo
-  const detectedGrado = resolveGrado(match.group);
-  const detectedGrupo = resolveGrupo(match.group);
+  // ── FIX: store grado as String to prevent strict === mismatch with number from JSON ──
   session = { role:'student', code, label:match.student.name,
-              grado: detectedGrado,
-              grupo: detectedGrupo,
-              studentId: match.student.id,
-              groupName: match.group.name };
+              grado: String(match.group.grado || ''),
+              grupo: parseGrupoLetter(match.group.name),
+              studentId: match.student.id };
   showApp();
 }
 
@@ -1023,37 +976,17 @@ function copyCodesToClipboard(){
 
 function renderCalifGroupList(){
   const groups = portal.calif.groups || [];
-  // Detect any groups with no grado/grupo resolved
-  const warnings = groups.filter(g => !resolveGrado(g) || !resolveGrupo(g));
-  const warningHtml = warnings.length ? `
-    <div style="margin-bottom:1rem;padding:1rem;background:#fff7ee;border:1.5px solid #f0c080;border-radius:10px">
-      <strong style="color:var(--orange)">⚠️ ${warnings.length} grupo(s) sin grado o grupo detectado</strong>
-      <p style="font-size:.82rem;color:var(--ink2);margin:.4rem 0 .5rem">El sistema no pudo leer el grado/grupo de estos grupos. Los materiales filtrados por grado NO llegarán a sus alumnos a menos que corrijas los nombres.<br>
-      El nombre debe empezar con el grado, ej: <strong>"2°A Matemáticas"</strong> o <strong>"3B Español"</strong>.</p>
-      <div style="display:flex;flex-wrap:wrap;gap:.4rem">${warnings.map(g=>`<span class="pill pill-off">${escHtml(g.name||'(sin nombre)')}</span>`).join('')}</div>
-    </div>` : '';
-  return `<div class="panel">
-    <h3>Grupos importados
-      <span style="font-size:.8rem;font-weight:400;color:var(--muted);margin-left:.5rem">— columna <span style="font-weight:700;color:var(--accent2)">GRADO</span> y <span style="font-weight:700;color:var(--orange)">GRUPO</span> son los que usa el filtro de materiales</span>
-    </h3>
-    ${warningHtml}
-    <div class="item-list">${
+  return `<div class="panel"><h3>Grupos importados</h3><div class="item-list">${
     groups.map(g=>{
-      const grado = resolveGrado(g);
-      const grupo = resolveGrupo(g);
+      const grado = gradoLabel(g.grado);
+      const grupo = grupoLabel(parseGrupoLetter(g.name));
       const trim = g.trimestre ? `Trimestre ${g.trimestre}` : '';
       const n = (g.students||[]).length;
       const nAct = (g.activities||[]).length;
-      const gradoBadge = grado
-        ? `<span class="pill pill-grado">${gradoLabel(grado)} detectado</span>`
-        : `<span class="pill" style="background:#fee2e2;color:#991b1b">❌ Grado no detectado</span>`;
-      const grupoBadge = grupo
-        ? `<span class="pill pill-grupo">Grupo ${grupo} detectado</span>`
-        : `<span class="pill" style="background:#fee2e2;color:#991b1b">❌ Grupo no detectado</span>`;
       return `<div class="item"><div class="i-icon">📚</div><div class="i-body">
         <div class="i-title">${escHtml(g.name)}</div>
         <div class="i-meta">
-          ${gradoBadge} ${grupoBadge}
+          <span class="pill pill-grado">${grado} ${grupo}</span>
           ${trim?`<span>📅 ${trim}</span>`:''}
           <span>👥 ${n} alumnos</span>
           <span>📝 ${nAct} actividades</span>
@@ -1781,21 +1714,7 @@ function renderStudentContent(){
     const groups = { link:[], doc:[], image:[], game:[] };
     mine.forEach(m=>{ if(groups[m.type]) groups[m.type].push(m); });
     const labels = { link:'🔗 Enlaces web', doc:'📄 Documentos', image:'🖼️ Imágenes', game:'🎮 Juegos' };
-    const gradoDetected = session.grado ? gradoLabel(session.grado) : '(no detectado)';
-    const grupoDetected = session.grupo ? grupoLabel(session.grupo) : '(no detectado)';
-    const alertNoGrado = (!session.grado || !session.grupo) ? `
-      <div style="margin-top:.6rem;padding:.7rem 1rem;background:#fff7ee;border:1.5px solid #f0c080;border-radius:9px;font-size:.82rem;color:var(--orange)">
-        ⚠️ No se pudo detectar tu grado o grupo del nombre <strong>"${escHtml(session.groupName||'')}"</strong>.
-        Solo verás materiales marcados como <strong>"Todos los grados"</strong>. Avisa a tu maestro para que corrija el nombre del grupo.
-      </div>` : '';
-    let html = `<div class="panel">
-      <h3>Hola, ${escHtml(session.label)} 👋</h3>
-      <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-top:.3rem">
-        <span class="pill pill-grado">📚 ${gradoDetected}</span>
-        <span class="pill pill-grupo">🏷️ Grupo ${grupoDetected}</span>
-      </div>
-      ${alertNoGrado}
-    </div>`;
+    let html = `<div class="panel"><h3>Hola, ${escHtml(session.label)} 👋</h3><p class="sub">Grado: ${gradoLabel(session.grado)} · Grupo: ${grupoLabel(session.grupo)}</p></div>`;
     const anyShown = Object.values(groups).some(arr=>arr.length);
     if(!anyShown){
       html += `<div class="empty"><div class="big">📭</div><p>Tu maestro aún no ha publicado materiales para tu grupo.</p></div>`;
