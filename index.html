@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Portal Escolar</title>
+<title>Portal Escolar de Informática</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Serif+Display&family=DM+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
@@ -367,7 +367,7 @@ body.parent-mode .tab.active{
 <!-- ═══════════════════ LANDING ═══════════════════ -->
 <div id="landing" class="landing">
   <div class="landing-header">
-    <h1>Portal Escolar</h1>
+    <h1>Portal Escolar de Informática</h1>
     <p>Acceso para maestros, alumnos y padres de familia</p>
     <div id="landingConn" class="conn-dot connecting" style="margin-top:1rem;background:rgba(0,0,0,.06);color:var(--ink2)"><span class="dot"></span><span id="landingConnLabel">Conectando…</span></div>
   </div>
@@ -412,7 +412,7 @@ body.parent-mode .tab.active{
 <!-- ═══════════════════ APP SHELL ═══════════════════ -->
 <div id="app" class="app hidden">
   <div class="topbar">
-    <div class="brand"><span id="brandIcon">📚</span><span id="brandText">Portal Escolar</span></div>
+    <div class="brand"><span id="brandIcon">📚</span><span id="brandText">Portal Escolar de Informática</span></div>
     <div class="user">
       <span id="connDot" class="conn-dot connecting"><span class="dot"></span><span id="connLabel">Conectando…</span></span>
       <span id="userLabel"></span>
@@ -428,7 +428,7 @@ body.parent-mode .tab.active{
 
 <script>
 /* ═══════════════════════════════════════════════════════════
-   PORTAL ESCOLAR
+   PORTAL ESCOLAR DE INFORMÁTICA
    Complementa el Registro de Calificaciones del maestro.
    Datos del portal: localStorage 'portal_v1'
    Datos del registro (importados): dentro de portal.calif
@@ -578,9 +578,6 @@ function subscribeFirebase(){
     }
   });
   // ── REAL-TIME from Registro de Calificaciones ──
-  // Index.html publica los datos completos en calificaciones/data
-  // cuando guarda. Si está configurado al MISMO Firebase project, los
-  // padres/alumnos ven los cambios en vivo sin recargar la página.
   fbDb.ref('calificaciones/data').on('value', snap=>{
     const v = snap.val();
     if(v && v.groups && Array.isArray(v.groups)){
@@ -626,11 +623,10 @@ function subscribeFirebase(){
 // Live flash when remote data updates
 function flashUpdate(){
   toast('📊 Datos actualizados en vivo','success');
-  // Pulse all visible panels
   setTimeout(()=>{
     document.querySelectorAll('.content .panel').forEach(p=>{
       p.classList.remove('flash-update');
-      void p.offsetWidth; // restart animation
+      void p.offsetWidth;
       p.classList.add('flash-update');
     });
   }, 30);
@@ -638,7 +634,6 @@ function flashUpdate(){
 
 function syncToFirebase(immediate){
   if(!fbReady || !fbConnected || suppressSync) return;
-  // Only teachers push to Firebase
   if(!session || session.role!=='teacher') return;
   clearTimeout(syncTimer);
   const doSync = ()=>{
@@ -653,7 +648,7 @@ function syncToFirebase(immediate){
     });
   };
   if(immediate) doSync();
-  else syncTimer = setTimeout(doSync, 800); // debounce
+  else syncTimer = setTimeout(doSync, 800);
 }
 
 function pushExamResult(result){
@@ -700,13 +695,12 @@ function openModal(html){
 function closeModal(){ document.getElementById('modalHolder').innerHTML=''; }
 
 // ── Grado/Grupo parsing from imported Registro groups ─────────
-// Registro groups have g.grado ('1','2','3') and g.name like "3°A Matemáticas"
 function parseGrupoLetter(name){
   if(!name) return '';
   const m = name.match(/[1-3]°?\s*([A-Fa-f])/);
   return m ? m[1].toUpperCase() : '';
 }
-function gradoLabel(g){ return g==='1'?'1°':g==='2'?'2°':g==='3'?'3°':'—'; }
+function gradoLabel(g){ return String(g)==='1'?'1°':String(g)==='2'?'2°':String(g)==='3'?'3°':'—'; }
 function grupoLabel(g){ return g ? g.toUpperCase() : '—'; }
 
 // ── LOGIN ─────────────────────────────────────
@@ -727,7 +721,6 @@ function findStudentByCode(code){
   if(!portal.calif || !portal.calif.groups) return null;
   const target = _normCode(code);
   if(!target) return null;
-  // Search across all groups; case-insensitive, whitespace-forgiving
   for(const g of portal.calif.groups){
     if(!g.students) continue;
     for(const s of g.students){
@@ -768,8 +761,11 @@ function loginStudent(){
     document.getElementById('sErr').textContent = msg;
     return;
   }
+  // ── FIX: store grado as String to prevent strict === mismatch with number from JSON ──
   session = { role:'student', code, label:match.student.name,
-              grado:match.group.grado||'', grupo:parseGrupoLetter(match.group.name), studentId:match.student.id };
+              grado: String(match.group.grado || ''),
+              grupo: parseGrupoLetter(match.group.name),
+              studentId: match.student.id };
   showApp();
 }
 
@@ -819,7 +815,6 @@ function showApp(){
   } else {
     document.getElementById('brandIcon').textContent = '👪';
     document.getElementById('brandText').textContent = 'Portal Padres';
-    // Append live indicator after username for parent mode
     const ul = document.getElementById('userLabel');
     if(ul && !document.getElementById('liveIndicator')){
       const live = document.createElement('span');
@@ -832,7 +827,6 @@ function showApp(){
     }
     renderParentTabs();
   }
-  // Remove live indicator if not parent
   if(session.role !== 'parent'){
     const li = document.getElementById('liveIndicator');
     if(li) li.remove();
@@ -901,7 +895,7 @@ function viewCalif(){
            <ol style="margin:.4rem 0 .6rem 1.2rem;font-size:.85rem;color:var(--ink2);line-height:1.6">
              <li>Abre tu <strong>Index.html</strong> (Registro de Calificaciones).</li>
              <li>Ve a <strong>⚙️ Ajustes → ☁️ Firebase</strong>.</li>
-             <li>Pega <strong>la misma configuración</strong> que pegaste en este Portal (apiKey, databaseURL, etc. del proyecto <code>portal-escolar-de-informatica</code>).</li>
+             <li>Pega <strong>la misma configuración</strong> que pegaste en este Portal.</li>
              <li>Guarda y verifica que el indicador de Firebase del Index se ponga en verde.</li>
              <li>En la consola de Firebase, en <strong>Realtime Database → Reglas</strong>, asegúrate de tener: <code style="display:block;background:#fff;padding:.5rem;border-radius:6px;margin-top:.3rem;font-size:.78rem">{"rules":{"portal":{".read":true,".write":true},"calificaciones":{".read":true,".write":true}}}</code></li>
              <li>Guarda una calificación en el Index — debería aparecer al instante en este Portal sin recargar.</li>
@@ -1013,7 +1007,7 @@ function importCalif(e){
       if(!groups){ toast('El archivo no contiene grupos reconocibles','error'); return; }
       portal.calif = { groups, importedAt: new Date().toISOString() };
       saveStore();
-      syncToFirebase(true); // IMMEDIATE, don't wait for debounce
+      syncToFirebase(true);
       renderTeacherContent();
       const st = countStudentsWithCode();
       toast(`Importados ${groups.length} grupos · ${st.withCode}/${st.total} alumnos con código ✓`,'success');
@@ -1030,7 +1024,7 @@ function syncFromBrowser(){
     if(!data.groups || !Array.isArray(data.groups)){ toast('Los datos del navegador no son válidos','error'); return; }
     portal.calif = { groups: data.groups, importedAt: new Date().toISOString() };
     saveStore();
-    syncToFirebase(true); // IMMEDIATE
+    syncToFirebase(true);
     renderTeacherContent();
     const st = countStudentsWithCode();
     toast(`Sincronizado: ${data.groups.length} grupos · ${st.withCode}/${st.total} con código ✓`,'success');
@@ -1299,7 +1293,6 @@ function saveExam(){
     if(q.opts.some(o=>!o.trim())){ toast('Hay opciones vacías','error'); return; }
   }
   if(examDraft._editingId){
-    // Replace existing exam
     const idx = portal.exams.findIndex(e=>e.id===examDraft._editingId);
     if(idx>=0){
       const old = portal.exams[idx];
@@ -1386,22 +1379,18 @@ function _loadMammoth(){
   });
 }
 
-// Parse plain text into questions/options
 function parseExamText(text){
-  // Normalize line breaks and split
   const lines = text.replace(/\r\n/g,'\n').replace(/\xa0/g,' ').split('\n')
     .map(l=>l.trim()).filter(l=>l.length>0);
   const questions = [];
   let current = null;
-  // Regexes
-  const reQ = /^\*?(\d+)[\.\)]\s*(.+)$/;            // "1. text" or "*1. text"
-  const reOpt = /^(\*?)\s*([a-zA-Z])[\)\.]\s*(.+)$/; // "a) text", "*a) text", "A. text"
+  const reQ = /^\*?(\d+)[\.\)]\s*(.+)$/;
+  const reOpt = /^(\*?)\s*([a-zA-Z])[\)\.]\s*(.+)$/;
   const reCorrectMark = /\s*(?:\[\s*[xX✓✔]\s*\]|\(correcta?\)|\*\s*$)/i;
 
   for(const line of lines){
     let m = line.match(reQ);
-    if(m && !line.match(/^[a-dA-D][\)\.]/)){ // make sure it's not an option that starts with digit
-      // Push previous
+    if(m && !line.match(/^[a-dA-D][\)\.]/)){ 
       if(current && current.opts.length>=2) questions.push(current);
       current = { q: m[2].trim().replace(/[:：]\s*$/,''), opts: [], correct: 0, _hasMark: false };
       continue;
@@ -1420,14 +1409,12 @@ function parseExamText(text){
       }
       continue;
     }
-    // Continuation of question text (no leading number)?
     if(current && current.opts.length===0 && line.length>2){
       current.q += ' ' + line;
     }
   }
   if(current && current.opts.length>=2) questions.push(current);
 
-  // Stats
   const unmarked = questions.filter(q=>!q._hasMark).length;
   questions.forEach(q=>{ delete q._hasMark; });
   return { questions, unmarked };
@@ -1448,7 +1435,6 @@ function importExamWord(event){
             toast('No se encontraron preguntas en el archivo. Revisa el formato.','error');
             return;
           }
-          // Try to extract a title from the first lines
           const firstLines = text.split('\n').map(l=>l.trim()).filter(l=>l.length>0).slice(0,5);
           let title = '';
           for(const l of firstLines){
@@ -1456,7 +1442,6 @@ function importExamWord(event){
               title = l; break;
             }
           }
-          // Populate draft (preserve existing fields if user already set them)
           if(!examDraft.title) examDraft.title = title || file.name.replace(/\.docx?$/i,'');
           examDraft.questions = parsed.questions;
           renderTeacherContent();
@@ -1482,8 +1467,6 @@ function exportExamWord(id){
   const grado = e.grado==='all' ? 'Todos los grados' : gradoLabel(e.grado);
   const grupo = e.grupo==='all' ? 'Todos los grupos' : 'Grupo '+e.grupo;
 
-  // Build the question/options HTML
-  // The correct answer is marked with * before the letter
   const letters = ['a','b','c','d','e','f','g','h'];
   const questionsHtml = e.questions.map((q, i) => {
     const opts = q.opts.map((o, j) => {
@@ -1518,7 +1501,7 @@ ${e.desc ? `<p style="text-align:center;font-size:11pt;color:#444;margin:0 0 14p
 <p class="header-info"><b>Fecha:</b> ____________________ &nbsp;&nbsp; <b>${escHtml(grado)}</b> &nbsp;&nbsp; <b>${escHtml(grupo)}</b> &nbsp;&nbsp; <b>Aciertos:</b> _______ / ${e.questions.length}</p>
 <p class="instructions"><b>Instrucciones:</b> Lee cuidadosamente cada pregunta y selecciona la opción que consideres correcta. Solo una respuesta es válida por pregunta.</p>
 ${questionsHtml}
-<p class="legend">📝 Generado el ${today} desde Portal Escolar. La respuesta correcta está marcada con un asterisco (*) antes de la letra. Borra los asteriscos antes de imprimir si no quieres que los alumnos los vean.</p>
+<p class="legend">📝 Generado el ${today} desde Portal Escolar de Informática. La respuesta correcta está marcada con un asterisco (*) antes de la letra. Borra los asteriscos antes de imprimir si no quieres que los alumnos los vean.</p>
 </body>
 </html>`;
 
@@ -1708,10 +1691,19 @@ function renderStudentTabs(){
 }
 function setStudentTab(id){ studentTab=id; renderStudentTabs(); }
 
+/*
+ * ── FIX: matchesStudent ──────────────────────────────────────────────────────
+ * El JSON importado del Registro puede traer `grado` como número (ej: 2)
+ * mientras que el <select> del material siempre guarda strings (ej: '2').
+ * Con === estricto, 2 !== '2' → el material nunca aparecía para 2° ni 3°.
+ * Solución: normalizar ambos lados con String() antes de comparar.
+ * Lo mismo aplica al grupo: se normaliza a mayúsculas por si acaso.
+ * ─────────────────────────────────────────────────────────────────────────────
+ */
 function matchesStudent(item){
   if(!item.visible) return false;
-  const gradoOk = item.grado==='all' || item.grado===session.grado;
-  const grupoOk = item.grupo==='all' || item.grupo===session.grupo;
+  const gradoOk = item.grado === 'all' || String(item.grado) === String(session.grado);
+  const grupoOk = item.grupo === 'all' || String(item.grupo||'').toUpperCase() === String(session.grupo||'').toUpperCase();
   return gradoOk && grupoOk;
 }
 
@@ -1719,7 +1711,6 @@ function renderStudentContent(){
   const c = document.getElementById('content');
   if(studentTab==='materials'){
     const mine = portal.materials.filter(matchesStudent);
-    // Group by type
     const groups = { link:[], doc:[], image:[], game:[] };
     mine.forEach(m=>{ if(groups[m.type]) groups[m.type].push(m); });
     const labels = { link:'🔗 Enlaces web', doc:'📄 Documentos', image:'🖼️ Imágenes', game:'🎮 Juegos' };
