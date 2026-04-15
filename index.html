@@ -2571,8 +2571,8 @@ function renderParentTabs(){
   if(hasMala) badge=' <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#ef4444;box-shadow:0 0 8px #ef4444;animation:livePulse 2s ease-in-out infinite;vertical-align:middle;margin-left:.3rem"></span>';
   else if(hasBuena) badge=' <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#10b981;box-shadow:0 0 8px #10b981;animation:livePulse 2s ease-in-out infinite;vertical-align:middle;margin-left:.3rem"></span>';
   const tabs=[
-    {id:'grades',label:'📊 Calificaciones'},
-    {id:'tasks',label:'📋 Tareas'},
+    {id:'grades',label:'📋 Lista de actividades'},
+    {id:'tasks',label:'📝 Tareas'},
     {id:'conduct',label:'⚠️ Conducta'+badge},
     {id:'summary',label:'🏆 Resumen final'}
   ];
@@ -2580,6 +2580,7 @@ function renderParentTabs(){
 }
 function setParentTab(id){ parentTab=id; renderParentTabs(); renderParentContent(); }
 function changeTrimSel(val){ if(!session) return; session._trimSel=val; renderParentContent(); }
+function changeTrimSelTasks(val){ if(!session) return; session._trimSelTasks=val; renderParentContent(); }
 
 function getStudentGroups(){
   if(!portal.calif||!portal.calif.groups) return [];
@@ -2645,7 +2646,7 @@ function renderParentGrades(groups){
     ? `<span class="pill pill-grado" style="margin-left:.8rem">${gradoLabel(session.grado)}</span><span class="pill pill-grupo">${session.grupo}</span>` 
     : '';
   const selectorHtml=`<div class="panel" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
-    <h3 style="margin:0;flex:1;min-width:200px">📊 Calificaciones de ${escHtml(session.studentName)} ${gradoGrupoInfo}</h3>
+    <h3 style="margin:0;flex:1;min-width:200px">📋 Lista de actividades de ${escHtml(session.studentName)} ${gradoGrupoInfo}</h3>
     <div style="display:flex;align-items:center;gap:.6rem">
       <label style="font-size:.78rem;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em">Filtrar:</label>
       <select onchange="changeTrimSel(this.value)" style="padding:9px 14px;border:2px solid var(--accent2);border-radius:9px;background:#fff;font-family:inherit;font-size:.9rem;font-weight:600;color:var(--ink);cursor:pointer;outline:none">
@@ -2693,15 +2694,32 @@ function renderParentGrades(groups){
 }
 
 function renderParentTasks(groups){
+  // Organizar grupos por trimestre para el selector
+  const porTrim={'1':[],'2':[],'3':[],'x':[]};
+  groups.forEach(g=>{ const t=g.trimestre||'x'; (porTrim[t]||porTrim['x']).push(g); });
+  
+  // Inicializar selección de trimestre para tareas si no existe
+  if(!session._trimSelTasks){
+    if(porTrim['1'].length) session._trimSelTasks='1';
+    else if(porTrim['2'].length) session._trimSelTasks='2';
+    else if(porTrim['3'].length) session._trimSelTasks='3';
+    else session._trimSelTasks='todos';
+  }
+  const sel=session._trimSelTasks;
+  
   function fechaDe(a){
     if(a.createdAt){ try{ const d=new Date(a.createdAt); if(!isNaN(d.getTime())) return d; }catch(e){} }
     if(a.id&&typeof a.id==='string'){ const ms=parseInt(a.id.split(/[^a-z0-9]/i)[0],36); if(!isNaN(ms)&&ms>1000000000000) return new Date(ms); }
     return null;
   }
   function fmt(d,exact){ if(!d) return '—'; const f=d.toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'}); const h=d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}); return exact?`${f} · ${h}`:`${f} · ~${h}`; }
+  
+  // Filtrar grupos según el trimestre seleccionado
+  const gruposFiltrados = sel==='todos' ? groups : (porTrim[sel]||[]);
+  
   let entregado=0,tarde=0,pendiente=0,total=0;
   const filas=[];
-  groups.forEach(g=>{
+  gruposFiltrados.forEach(g=>{
     const s=getStudentInGroup(g); if(!s) return;
     const trimNum=g.trimestre||'x';
     (g.activities||[]).forEach(a=>{
@@ -2723,18 +2741,36 @@ function renderParentTasks(groups){
     });
   });
   filas.sort((a,b)=>b.ts-a.ts);
+  
+  // Selector de trimestre
+  const selectorHtml=`<div class="panel" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
+    <h3 style="margin:0;flex:1;min-width:200px">📝 Tareas de ${escHtml(session.studentName)}</h3>
+    <div style="display:flex;align-items:center;gap:.6rem">
+      <label style="font-size:.78rem;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em">Filtrar:</label>
+      <select onchange="changeTrimSelTasks(this.value)" style="padding:9px 14px;border:2px solid var(--accent2);border-radius:9px;background:#fff;font-family:inherit;font-size:.9rem;font-weight:600;color:var(--ink);cursor:pointer;outline:none">
+        ${porTrim['1'].length?`<option value="1" ${sel==='1'?'selected':''}>📘 1° Trimestre</option>`:''}
+        ${porTrim['2'].length?`<option value="2" ${sel==='2'?'selected':''}>📗 2° Trimestre</option>`:''}
+        ${porTrim['3'].length?`<option value="3" ${sel==='3'?'selected':''}>📙 3° Trimestre</option>`:''}
+        <option value="todos" ${sel==='todos'?'selected':''}>📚 Ver todos</option>
+      </select>
+    </div>
+  </div>`;
+  
   const stats=`<div class="stats-grid">
     <div class="stat"><div class="label">📚 Total</div><div class="value">${total}</div></div>
     <div class="stat green"><div class="label">✅ Entregadas</div><div class="value">${entregado}</div></div>
     <div class="stat orange"><div class="label">⏰ Con retardo</div><div class="value">${tarde}</div></div>
     <div class="stat red"><div class="label">❌ No entregadas</div><div class="value">${pendiente}</div></div>
   </div>`;
-  if(!filas.length) return `<div class="panel"><h3>📋 Reporte detallado</h3><p class="sub">Sin actividades para ${escHtml(session.studentName)}.</p></div>${stats}`;
+  
+  if(!filas.length) return `${selectorHtml}<div class="panel"><h3>📋 Reporte detallado</h3><p class="sub">Sin tareas para ${escHtml(session.studentName)} en este trimestre.</p></div>${stats}`;
+  
   const filasHtml=filas.map(f=>{
     const stTxt=f.est==='entregado'?'<span style="color:#10b981;font-weight:700">✅ Entregada</span>':f.est==='tarde'?'<span style="color:#f59e0b;font-weight:700">⏰ Con retardo</span>':f.est==='pendiente'?'<span style="color:#ef4444;font-weight:700">❌ No entregada</span>':'<span style="color:#bbb">—</span>';
     return `<tr><td style="white-space:nowrap;font-size:.78rem;color:var(--ink2);font-weight:600">📅 ${escHtml(f.fechaStr)}</td><td><strong>${escHtml(f.nombre)}</strong>${f.note?`<div style="font-size:.74rem;color:var(--muted);margin-top:.2rem;font-style:italic">📝 ${escHtml(f.note)}</div>`:''}</td><td><span class="subj-chip">${escHtml(f.materia)}</span> <span class="trim-chip t${f.trimNum}">T${f.trim}</span></td><td style="text-align:center">${_chipCalif(f.grade)}</td><td style="text-align:center;font-size:.82rem">${stTxt}</td></tr>`;
   }).join('');
-  return `<div class="panel"><h3>📋 Reporte detallado de tareas y actividades</h3><p class="sub">Cada actividad de ${escHtml(session.studentName)} con día, hora, calificación y estado · más recientes primero</p></div>${stats}<div class="panel"><div class="grades-wrap"><table class="grades-table"><thead><tr><th style="min-width:130px">📅 Fecha y hora</th><th>📚 Actividad</th><th>Materia</th><th style="text-align:center;min-width:90px">Calif.</th><th style="text-align:center;min-width:140px">Estado</th></tr></thead><tbody>${filasHtml}</tbody></table></div><p class="sub" style="margin-top:.8rem;font-size:.75rem">💡 Las fechas con <strong>~</strong> son aproximadas (actividades creadas antes de esta función). Las nuevas mostrarán fecha y hora exactas.</p></div>`;
+  
+  return `${selectorHtml}${stats}<div class="panel"><div class="grades-wrap"><table class="grades-table"><thead><tr><th style="min-width:130px">📅 Fecha y hora</th><th>📚 Actividad</th><th>Materia</th><th style="text-align:center;min-width:90px">Calif.</th><th style="text-align:center;min-width:140px">Estado</th></tr></thead><tbody>${filasHtml}</tbody></table></div><p class="sub" style="margin-top:.8rem;font-size:.75rem">💡 Las fechas con <strong>~</strong> son aproximadas (actividades creadas antes de esta función). Las nuevas mostrarán fecha y hora exactas.</p></div>`;
 }
 
 function renderParentConduct(groups){
