@@ -1499,8 +1499,8 @@ function editarAlumno(id){
       <div class="form-row">
         <div class="form-group">
           <label>ID del Alumno</label>
-          <input type="text" id="editAlumnoId" value="${escHtml(alumno.id)}" readonly style="background:#eee;cursor:not-allowed">
-          <small style="color:var(--muted);font-size:.75rem">El ID no se puede modificar</small>
+          <input type="text" id="editAlumnoId" value="${escHtml(alumno.id)}" placeholder="Ej: ABC1">
+          <small style="color:var(--accent2);font-size:.75rem">⚠️ Cambiar el ID actualizará el código de acceso del alumno</small>
         </div>
       </div>
       <div class="form-row">
@@ -1552,20 +1552,32 @@ function guardarEdicionAlumno(id){
     return;
   }
   
+  const nuevoId    = document.getElementById('editAlumnoId').value.trim();
   const nuevoNombre = document.getElementById('editAlumnoNombre').value.trim();
   const nuevoGrado = document.getElementById('editAlumnoGrado').value;
   const nuevoGrupo = document.getElementById('editAlumnoGrupo').value;
   
+  if(!nuevoId){
+    toast('El ID no puede estar vacío','error');
+    return;
+  }
   if(!nuevoNombre){
     toast('El nombre no puede estar vacío','error');
     return;
   }
+  // Verificar que el nuevo ID no lo tenga otro alumno diferente
+  if(nuevoId !== id && portal.registroAlumnos.some(a => a.id === nuevoId)){
+    toast('Ya existe otro alumno con ese ID','error');
+    return;
+  }
   
+  const idAnterior   = alumno.id;
   const gradoAnterior = alumno.grado;
   const grupoAnterior = alumno.grupo;
   
-  // Actualizar datos
-  alumno.name = normalizeStudentName(nuevoNombre);
+  // Actualizar todos los datos incluyendo el ID
+  alumno.id    = nuevoId;
+  alumno.name  = normalizeStudentName(nuevoNombre);
   alumno.grado = nuevoGrado;
   alumno.grupo = nuevoGrupo;
   
@@ -1573,8 +1585,9 @@ function guardarEdicionAlumno(id){
   closeModal();
   renderTeacherContent();
   
-  // Mensaje informativo si cambió de grupo
-  if(gradoAnterior !== nuevoGrado || grupoAnterior !== nuevoGrupo){
+  if(idAnterior !== nuevoId){
+    toast(`✓ ID actualizado: ${idAnterior} → ${nuevoId}`, 'success');
+  } else if(gradoAnterior !== nuevoGrado || grupoAnterior !== nuevoGrupo){
     toast(`✓ Alumno movido de ${gradoLabel(gradoAnterior)} ${grupoAnterior} → ${gradoLabel(nuevoGrado)} ${nuevoGrupo}`, 'success');
   } else {
     toast('Alumno actualizado ✓', 'success');
