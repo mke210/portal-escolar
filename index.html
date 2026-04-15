@@ -880,8 +880,10 @@ function showApp(){
 ═══════════════════════════════════════════ */
 let teacherTab = 'calif';
 let alumnoGradoFiltro = 'todos'; // filtro activo en pestaña Registro de Alumnos
+let alumnoGrupoFiltro = 'todos'; // filtro de grupo activo en pestaña Registro de Alumnos
 
 function setAlumnoGradoFiltro(val){ alumnoGradoFiltro = val; renderTeacherContent(); }
+function setAlumnoGrupoFiltro(val){ alumnoGrupoFiltro = val; renderTeacherContent(); }
 
 function renderTeacherTabs(){
   const tabs = [
@@ -1245,16 +1247,28 @@ function viewAlumnos(){
     <div class="panel" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:1rem 1.4rem">
       <h3 style="margin:0;flex:1;min-width:160px">📋 Listado de alumnos</h3>
       <div style="display:flex;align-items:center;gap:.6rem">
-        <label style="font-size:.78rem;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em">Filtrar por grado:</label>
+        <label style="font-size:.78rem;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em">Grado:</label>
         <select onchange="setAlumnoGradoFiltro(this.value)" style="padding:9px 14px;border:2px solid var(--accent2);border-radius:9px;background:#fff;font-family:inherit;font-size:.9rem;font-weight:600;color:var(--ink);cursor:pointer;outline:none">
-          <option value="todos" ${alumnoGradoFiltro==='todos'?'selected':''}>📚 Todos los grados</option>
+          <option value="todos" ${alumnoGradoFiltro==='todos'?'selected':''}>📚 Todos</option>
           <option value="1" ${alumnoGradoFiltro==='1'?'selected':''}>1° Primero</option>
           <option value="2" ${alumnoGradoFiltro==='2'?'selected':''}>2° Segundo</option>
           <option value="3" ${alumnoGradoFiltro==='3'?'selected':''}>3° Tercero</option>
         </select>
       </div>
+      <div style="display:flex;align-items:center;gap:.6rem">
+        <label style="font-size:.78rem;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em">Grupo:</label>
+        <select onchange="setAlumnoGrupoFiltro(this.value)" style="padding:9px 14px;border:2px solid var(--orange);border-radius:9px;background:#fff;font-family:inherit;font-size:.9rem;font-weight:600;color:var(--ink);cursor:pointer;outline:none">
+          <option value="todos" ${alumnoGrupoFiltro==='todos'?'selected':''}>🗂️ Todos</option>
+          <option value="A" ${alumnoGrupoFiltro==='A'?'selected':''}>Grupo A</option>
+          <option value="B" ${alumnoGrupoFiltro==='B'?'selected':''}>Grupo B</option>
+          <option value="C" ${alumnoGrupoFiltro==='C'?'selected':''}>Grupo C</option>
+          <option value="D" ${alumnoGrupoFiltro==='D'?'selected':''}>Grupo D</option>
+          <option value="E" ${alumnoGrupoFiltro==='E'?'selected':''}>Grupo E</option>
+          <option value="F" ${alumnoGrupoFiltro==='F'?'selected':''}>Grupo F</option>
+        </select>
+      </div>
     </div>
-    ${renderAlumnosTable(alumnoGradoFiltro)}` : `
+    ${renderAlumnosTable(alumnoGradoFiltro, alumnoGrupoFiltro)}` : `
       <div class="empty">
         <div class="big">👥</div>
         <p>Aún no hay alumnos registrados.<br>Importa un archivo JSON o agrégalos manualmente.</p>
@@ -1262,15 +1276,17 @@ function viewAlumnos(){
   `;
 }
 
-function renderAlumnosTable(gradoFiltro){
+function renderAlumnosTable(gradoFiltro, grupoFiltro){
   gradoFiltro = gradoFiltro || 'todos';
-  // Filtra alumnos según el grado seleccionado
-  const alumnosFiltrados = gradoFiltro === 'todos'
-    ? portal.registroAlumnos
-    : portal.registroAlumnos.filter(a => String(a.grado) === String(gradoFiltro));
+  grupoFiltro = grupoFiltro || 'todos';
+  // Filtra alumnos según grado y grupo seleccionados
+  let alumnosFiltrados = portal.registroAlumnos;
+  if(gradoFiltro !== 'todos') alumnosFiltrados = alumnosFiltrados.filter(a => String(a.grado) === String(gradoFiltro));
+  if(grupoFiltro !== 'todos') alumnosFiltrados = alumnosFiltrados.filter(a => String(a.grupo).toUpperCase() === String(grupoFiltro).toUpperCase());
 
   if(!alumnosFiltrados.length){
-    return `<div class="empty"><div class="big">🔍</div><p>No hay alumnos registrados en ${gradoFiltro==='todos'?'ningún grado':gradoLabel(gradoFiltro)+' grado'}.</p></div>`;
+    const desc = [gradoFiltro!=='todos'?gradoLabel(gradoFiltro)+' grado':'', grupoFiltro!=='todos'?'Grupo '+grupoFiltro:''].filter(Boolean).join(' / ') || 'ningún criterio';
+    return `<div class="empty"><div class="big">🔍</div><p>No hay alumnos registrados para: <strong>${desc}</strong>.</p></div>`;
   }
 
   // Organiza alumnos por grado y grupo
