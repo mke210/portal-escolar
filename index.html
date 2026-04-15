@@ -879,6 +879,9 @@ function showApp(){
    TEACHER AREA
 ═══════════════════════════════════════════ */
 let teacherTab = 'calif';
+let alumnoGradoFiltro = 'todos'; // filtro activo en pestaña Registro de Alumnos
+
+function setAlumnoGradoFiltro(val){ alumnoGradoFiltro = val; renderTeacherContent(); }
 
 function renderTeacherTabs(){
   const tabs = [
@@ -957,7 +960,7 @@ function viewCalif(){
       <p class="sub" style="margin-top:.8rem;margin-bottom:0;font-size:.8rem">💡 <strong>Sincronizar desde este navegador</strong> lee los datos del Registro si ambos archivos (Index.html y Portal.html) están abiertos en el mismo origen. ☁️ Todo lo que importes o modifiques se publica <strong>automáticamente en Firebase</strong> para que padres y alumnos lo vean en tiempo real desde cualquier dispositivo.</p>
     </div>
     ${stats}
-    ${hasCalif?renderCalifGroupList():`<div class="empty"><div class="big">📊</div><p>Aún no has importado calificaciones.<br>Usa el botón de arriba para cargar el JSON.</p></div>`}
+    ${!hasCalif?`<div class="empty"><div class="big">📊</div><p>Aún no has importado calificaciones.<br>Usa el botón de arriba para cargar el JSON.</p></div>`:''}
   `;
 }
 
@@ -1238,7 +1241,20 @@ function viewAlumnos(){
       </div>
     </div>
     
-    ${hasAlumnos ? renderAlumnosTable() : `
+    ${hasAlumnos ? `
+    <div class="panel" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap;padding:1rem 1.4rem">
+      <h3 style="margin:0;flex:1;min-width:160px">📋 Listado de alumnos</h3>
+      <div style="display:flex;align-items:center;gap:.6rem">
+        <label style="font-size:.78rem;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em">Filtrar por grado:</label>
+        <select onchange="setAlumnoGradoFiltro(this.value)" style="padding:9px 14px;border:2px solid var(--accent2);border-radius:9px;background:#fff;font-family:inherit;font-size:.9rem;font-weight:600;color:var(--ink);cursor:pointer;outline:none">
+          <option value="todos" ${alumnoGradoFiltro==='todos'?'selected':''}>📚 Todos los grados</option>
+          <option value="1" ${alumnoGradoFiltro==='1'?'selected':''}>1° Primero</option>
+          <option value="2" ${alumnoGradoFiltro==='2'?'selected':''}>2° Segundo</option>
+          <option value="3" ${alumnoGradoFiltro==='3'?'selected':''}>3° Tercero</option>
+        </select>
+      </div>
+    </div>
+    ${renderAlumnosTable(alumnoGradoFiltro)}` : `
       <div class="empty">
         <div class="big">👥</div>
         <p>Aún no hay alumnos registrados.<br>Importa un archivo JSON o agrégalos manualmente.</p>
@@ -1246,10 +1262,20 @@ function viewAlumnos(){
   `;
 }
 
-function renderAlumnosTable(){
+function renderAlumnosTable(gradoFiltro){
+  gradoFiltro = gradoFiltro || 'todos';
+  // Filtra alumnos según el grado seleccionado
+  const alumnosFiltrados = gradoFiltro === 'todos'
+    ? portal.registroAlumnos
+    : portal.registroAlumnos.filter(a => String(a.grado) === String(gradoFiltro));
+
+  if(!alumnosFiltrados.length){
+    return `<div class="empty"><div class="big">🔍</div><p>No hay alumnos registrados en ${gradoFiltro==='todos'?'ningún grado':gradoLabel(gradoFiltro)+' grado'}.</p></div>`;
+  }
+
   // Organiza alumnos por grado y grupo
   const organized = {};
-  portal.registroAlumnos.forEach(a => {
+  alumnosFiltrados.forEach(a => {
     const key = `${a.grado}-${a.grupo}`;
     if(!organized[key]) organized[key] = [];
     organized[key].push(a);
