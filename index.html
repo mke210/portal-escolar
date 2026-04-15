@@ -443,7 +443,8 @@ let portal = {
   materials: [],      // [{id,type,title,desc,grado,grupo,content,createdAt,visible}]
   exams: [],          // [{id,title,desc,grado,grupo,questions:[{q,opts:[],correct}],visible}]
   calif: null,        // imported JSON from Registro (contains .groups)
-  examResults: []     // [{studentCode,studentName,examId,score,total,date}]
+  examResults: [],    // [{studentCode,studentName,examId,score,total,date}]
+  registroAlumnos: [] // [{id,name,grado,grupo,phone,originalGroup}]
 };
 let session = null;   // {role,label} | null
 
@@ -457,6 +458,7 @@ function loadStore(){
       if(!portal.materials) portal.materials = [];
       if(!portal.exams) portal.exams = [];
       if(!portal.examResults) portal.examResults = [];
+      if(!portal.registroAlumnos) portal.registroAlumnos = [];
     }
   }catch(e){console.error(e)}
 }
@@ -559,13 +561,14 @@ function initFirebase(){
 
 function subscribeFirebase(){
   if(!fbReady) return;
-  // Teacher data (materials, exams, calif)
+  // Teacher data (materials, exams, calif, registroAlumnos)
   fbDb.ref('portal/data').on('value', snap=>{
     const v = snap.val();
     if(v){
       suppressSync = true;
       portal.materials = v.materials || [];
       portal.exams = v.exams || [];
+      portal.registroAlumnos = v.registroAlumnos || [];
       // Only overwrite calif from portal/data if calificaciones/data hasn't pushed yet
       if(v.calif && !portal._califFromRegistro) portal.calif = v.calif;
       localStorage.setItem(STORE_KEY, JSON.stringify(portal));
@@ -641,6 +644,7 @@ function syncToFirebase(immediate){
       materials: portal.materials || [],
       exams: portal.exams || [],
       calif: portal.calif || null,
+      registroAlumnos: portal.registroAlumnos || [],
       updatedAt: Date.now()
     }).catch(err=>{
       console.error('Sync error',err);
@@ -666,6 +670,7 @@ function forcePublish(){
     materials: portal.materials || [],
     exams: portal.exams || [],
     calif: portal.calif || null,
+    registroAlumnos: portal.registroAlumnos || [],
     updatedAt: Date.now()
   }).then(()=>{
     toast('Publicado a Firebase ✓','success');
@@ -841,6 +846,7 @@ let teacherTab = 'calif';
 function renderTeacherTabs(){
   const tabs = [
     {id:'calif', label:'📊 Calificaciones'},
+    {id:'alumnos', label:'👥 Registro de Alumnos'},
     {id:'materials', label:'📁 Materiales'},
     {id:'exams', label:'📝 Exámenes'},
     {id:'visibility', label:'👁️ Visibilidad'},
@@ -855,6 +861,7 @@ function setTeacherTab(id){ teacherTab=id; renderTeacherTabs(); }
 function renderTeacherContent(){
   const c = document.getElementById('content');
   if(teacherTab==='calif') c.innerHTML = viewCalif();
+  else if(teacherTab==='alumnos') c.innerHTML = viewAlumnos();
   else if(teacherTab==='materials') c.innerHTML = viewMaterials();
   else if(teacherTab==='exams') c.innerHTML = viewExams();
   else if(teacherTab==='visibility') c.innerHTML = viewVisibility();
@@ -976,7 +983,11 @@ function copyCodesToClipboard(){
 
 function renderCalifGroupList(){
   const groups = portal.calif.groups || [];
-  return `<div class="panel"><h3>Grupos importados</h3><div class="item-list">${
+  return `<div class="panel">
+    <h3>Grupos importados 
+      <button class="btn btn-danger btn-small" style="margin-left:1rem" onclick="eliminarTodosGruposCalif()">🗑️ Eliminar todos</button>
+    </h3>
+    <div class="item-list">${
     groups.map(g=>{
       const grado = gradoLabel(g.grado);
       const grupo = grupoLabel(parseGrupoLetter(g.name));
@@ -991,7 +1002,11 @@ function renderCalifGroupList(){
           <span>👥 ${n} alumnos</span>
           <span>📝 ${nAct} actividades</span>
         </div>
-      </div></div>`;
+      </div>
+      <div class="i-actions">
+        <button class="btn btn-danger btn-small" onclick="eliminarGrupoCalif('${g.id}')" title="Eliminar grupo">🗑️</button>
+      </div>
+      </div>`;
     }).join('')
   }</div></div>`;
 }
@@ -1034,6 +1049,566 @@ function clearCalif(){
   if(!confirm('¿Borrar los datos de calificaciones importados?')) return;
   portal.calif = null; saveStore(); renderTeacherContent();
   toast('Datos borrados','success');
+}
+
+function eliminarGrupoCalif(groupId){
+  if(!portal.calif || !portal.calif.groups) return;
+  const grupo = portal.calif.groups.find(g => g.id === groupId);
+  if(!grupo) return;
+  
+  if(!confirm(`¿Eliminar el grupo "${grupo.name}"? Esta acción no se puede deshacer.`)) return;
+  
+  portal.calif.groups = portal.calif.groups.filter(g => g.id !== groupId);
+  
+  // Si no quedan grupos, limpiar calif
+  if(portal.calif.groups.length === 0){
+    portal.calif = null;
+  }
+  
+  saveStore();
+  syncToFirebase(true);
+  renderTeacherContent();
+  toast(`Grupo "${grupo.name}" eliminado`, 'success');
+}
+
+function eliminarTodosGruposCalif(){
+  if(!portal.calif || !portal.calif.groups || !portal.calif.groups.length) return;
+  
+  const total = portal.calif.groups.length;
+  if(!confirm(`¿Eliminar TODOS los ${total} grupos de calificaciones? Esta acción no se puede deshacer.`)) return;
+  
+  portal.calif = null;
+  saveStore();
+  syncToFirebase(true);
+  renderTeacherContent();
+  toast(`${total} grupos eliminados`, 'success');
+}
+
+// ══════════════════════════════════════════════════════
+//   REGISTRO DE ALUMNOS
+// ══════════════════════════════════════════════════════
+
+// Almacena los alumnos importados del JSON de asistencia
+if(!portal.registroAlumnos) portal.registroAlumnos = [];
+
+function parseGradoGrupoFromName(name){
+  // Parsea nombres como "Segundo ABC", "Primero DEF", "Tercero ABC"
+  const gradoMap = {
+    'primero': '1', 'primer': '1', '1': '1', '1°': '1', '1ro': '1',
+    'segundo': '2', '2': '2', '2°': '2', '2do': '2',
+    'tercero': '3', 'tercer': '3', '3': '3', '3°': '3', '3ro': '3'
+  };
+  const lower = (name||'').toLowerCase().trim();
+  let grado = '';
+  for(const [key, val] of Object.entries(gradoMap)){
+    if(lower.includes(key)){ grado = val; break; }
+  }
+  // Extrae letras de grupo (ABC, DEF, etc.)
+  const gruposMatch = lower.match(/([a-f]+)\s*$/i);
+  const grupos = gruposMatch ? gruposMatch[1].toUpperCase().split('') : [];
+  return { grado, grupos };
+}
+
+function normalizeStudentName(name){
+  // Normaliza espacios múltiples y capitaliza correctamente
+  return String(name||'')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(' ')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(' ');
+}
+
+function viewAlumnos(){
+  const hasAlumnos = portal.registroAlumnos && portal.registroAlumnos.length > 0;
+  
+  // Estadísticas
+  let stats = '';
+  if(hasAlumnos){
+    const byGrado = {};
+    const byGrupo = {};
+    portal.registroAlumnos.forEach(a => {
+      byGrado[a.grado] = (byGrado[a.grado]||0) + 1;
+      const key = a.grado + '-' + a.grupo;
+      byGrupo[key] = (byGrupo[key]||0) + 1;
+    });
+    const totalAlumnos = portal.registroAlumnos.length;
+    const totalGrupos = Object.keys(byGrupo).length;
+    
+    stats = `
+      <div class="stats-grid">
+        <div class="stat"><div class="label">👥 Total Alumnos</div><div class="value">${totalAlumnos}</div></div>
+        <div class="stat green"><div class="label">📚 Grupos</div><div class="value">${totalGrupos}</div></div>
+        <div class="stat orange"><div class="label">1° Grado</div><div class="value">${byGrado['1']||0}</div></div>
+        <div class="stat"><div class="label">2° Grado</div><div class="value">${byGrado['2']||0}</div></div>
+        <div class="stat" style="border-left-color:var(--green)"><div class="label">3° Grado</div><div class="value">${byGrado['3']||0}</div></div>
+      </div>`;
+  }
+
+  return `
+    <div class="panel" style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);border:1.5px solid #22c55e">
+      <h3 style="color:#166534">👥 Registro de Alumnos</h3>
+      <p class="sub">Importa y administra la lista de alumnos por grado, grupo e ID. Los datos importados se integrarán automáticamente con el registro de calificaciones.</p>
+    </div>
+    
+    <div class="panel">
+      <h3>📥 Importar alumnos desde JSON</h3>
+      <p class="sub">Carga un archivo JSON con la estructura de asistencia que contiene grupos y personas.</p>
+      <input type="file" id="alumnosFile" accept=".json" style="display:none" onchange="importAlumnosJSON(event)">
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="document.getElementById('alumnosFile').click()">📂 Seleccionar archivo JSON</button>
+        ${hasAlumnos?'<button class="btn btn-danger" onclick="clearAlumnos()">🗑️ Borrar registro</button>':''}
+      </div>
+    </div>
+    
+    ${stats}
+    
+    <div class="panel">
+      <h3>➕ Agregar alumno manualmente</h3>
+      <div class="form-row triple">
+        <div class="form-group">
+          <label>ID del Alumno</label>
+          <input type="text" id="nuevoAlumnoId" placeholder="Ej: ABC1">
+        </div>
+        <div class="form-group">
+          <label>Grado</label>
+          <select id="nuevoAlumnoGrado">
+            <option value="1">1° Primero</option>
+            <option value="2">2° Segundo</option>
+            <option value="3">3° Tercero</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Grupo</label>
+          <select id="nuevoAlumnoGrupo">
+            <option value="A">A</option>
+            <option value="B">B</option>
+            <option value="C">C</option>
+            <option value="D">D</option>
+            <option value="E">E</option>
+            <option value="F">F</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="grid-column:span 2">
+          <label>Nombre completo (Apellido Paterno, Materno, Nombres)</label>
+          <input type="text" id="nuevoAlumnoNombre" placeholder="Ej: García López María Fernanda">
+        </div>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-green" onclick="agregarAlumnoManual()">✔️ Agregar alumno</button>
+      </div>
+    </div>
+    
+    ${hasAlumnos ? renderAlumnosTable() : `
+      <div class="empty">
+        <div class="big">👥</div>
+        <p>Aún no hay alumnos registrados.<br>Importa un archivo JSON o agrégalos manualmente.</p>
+      </div>`}
+  `;
+}
+
+function renderAlumnosTable(){
+  // Organiza alumnos por grado y grupo
+  const organized = {};
+  portal.registroAlumnos.forEach(a => {
+    const key = `${a.grado}-${a.grupo}`;
+    if(!organized[key]) organized[key] = [];
+    organized[key].push(a);
+  });
+  
+  // Ordena las claves (1-A, 1-B, 1-C, 2-A, etc.)
+  const sortedKeys = Object.keys(organized).sort((a, b) => {
+    const [g1, gr1] = a.split('-');
+    const [g2, gr2] = b.split('-');
+    if(g1 !== g2) return parseInt(g1) - parseInt(g2);
+    return gr1.localeCompare(gr2);
+  });
+  
+  let html = '';
+  
+  sortedKeys.forEach(key => {
+    const [grado, grupo] = key.split('-');
+    const alumnos = organized[key].sort((a, b) => a.name.localeCompare(b.name));
+    
+    html += `
+      <div class="panel">
+        <h3>
+          <span class="pill pill-grado">${gradoLabel(grado)}</span>
+          <span class="pill pill-grupo">Grupo ${grupo}</span>
+          <span style="font-size:.85rem;color:var(--muted);margin-left:.5rem">(${alumnos.length} alumnos)</span>
+        </h3>
+        <div class="grades-wrap">
+          <table class="grades-table" style="min-width:auto">
+            <thead>
+              <tr>
+                <th style="width:60px;text-align:center">#</th>
+                <th style="width:80px">ID</th>
+                <th>Nombre del Alumno</th>
+                <th style="width:100px;text-align:center">Acciones</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${alumnos.map((a, idx) => `
+                <tr>
+                  <td style="text-align:center;color:var(--muted)">${idx + 1}</td>
+                  <td><code style="background:var(--soft);padding:3px 8px;border-radius:5px;font-weight:600;color:var(--accent2)">${escHtml(a.id)}</code></td>
+                  <td style="font-weight:500">${escHtml(a.name)}</td>
+                  <td style="text-align:center">
+                    <button class="btn btn-blue btn-small" onclick="editarAlumno('${a.id}')" title="Editar">✏️</button>
+                    <button class="btn btn-danger btn-small" onclick="eliminarAlumno('${a.id}')" title="Eliminar">🗑️</button>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>`;
+  });
+  
+  // Botón para exportar
+  html += `
+    <div class="panel" style="background:linear-gradient(135deg,#eff6ff,#dbeafe);border:1.5px solid #3b82f6">
+      <h3 style="color:#1e40af">💾 Guardar y Exportar</h3>
+      <p class="sub">Guarda los cambios en Firebase y/o descarga una copia del registro.</p>
+      <div class="btn-row">
+        <button class="btn btn-green" onclick="guardarRegistroAlumnos()">☁️ Guardar en Firebase</button>
+        <button class="btn btn-blue" onclick="exportarAlumnos()">📥 Descargar JSON</button>
+        <button class="btn btn-sec" onclick="integrarConCalificaciones()">🔗 Integrar con Calificaciones</button>
+      </div>
+    </div>`;
+  
+  return html;
+}
+
+function importAlumnosJSON(e){
+  const f = e.target.files[0];
+  if(!f) return;
+  
+  const r = new FileReader();
+  r.onload = ev => {
+    try {
+      const data = JSON.parse(ev.target.result);
+      let alumnos = [];
+      
+      // FORMATO 1: JSON exportado desde este mismo sistema
+      // Estructura: { alumnos: [...], exportedAt: "...", totalAlumnos: N }
+      if(data.alumnos && Array.isArray(data.alumnos)){
+        alumnos = data.alumnos.map(a => ({
+          id: a.id || uid(),
+          name: normalizeStudentName(a.name),
+          grado: a.grado || '1',
+          grupo: a.grupo || 'A',
+          phone: a.phone || '',
+          originalGroup: a.originalGroup || ''
+        }));
+      }
+      // FORMATO 2: JSON de asistencia original
+      // Estructura: { groups: [{ name: "Segundo ABC", persons: [...] }] }
+      else if(data.groups && Array.isArray(data.groups)){
+        data.groups.forEach(group => {
+          const { grado, grupos } = parseGradoGrupoFromName(group.name);
+          const persons = group.persons || group.students || [];
+          
+          persons.forEach((person, idx) => {
+            const grupoAsignado = grupos.length > 0 ? grupos[idx % grupos.length] || grupos[0] : 'A';
+            
+            alumnos.push({
+              id: person.id || uid(),
+              name: normalizeStudentName(person.name),
+              grado: grado || '1',
+              grupo: grupoAsignado,
+              phone: person.phone || '',
+              originalGroup: group.name
+            });
+          });
+        });
+      }
+      // FORMATO NO RECONOCIDO
+      else {
+        toast('El archivo no tiene una estructura reconocida. Usa un JSON exportado o de asistencia.','error');
+        return;
+      }
+      
+      if(alumnos.length === 0){
+        toast('No se encontraron alumnos en el archivo','error');
+        return;
+      }
+      
+      // Pregunta si quiere reemplazar o agregar
+      if(portal.registroAlumnos.length > 0){
+        if(confirm(`Ya tienes ${portal.registroAlumnos.length} alumnos registrados. ¿Deseas reemplazarlos? (Cancelar para agregar a los existentes)`)){
+          portal.registroAlumnos = alumnos;
+        } else {
+          // Evitar duplicados por ID
+          const existingIds = new Set(portal.registroAlumnos.map(a => a.id));
+          const nuevos = alumnos.filter(a => !existingIds.has(a.id));
+          portal.registroAlumnos = [...portal.registroAlumnos, ...nuevos];
+        }
+      } else {
+        portal.registroAlumnos = alumnos;
+      }
+      
+      saveStore();
+      renderTeacherContent();
+      toast(`✓ Importados ${alumnos.length} alumnos`, 'success');
+      
+    } catch(err) {
+      console.error(err);
+      toast('Error al leer el archivo JSON: ' + err.message, 'error');
+    }
+  };
+  r.readAsText(f);
+  e.target.value = '';
+}
+
+function agregarAlumnoManual(){
+  const id = document.getElementById('nuevoAlumnoId').value.trim();
+  const grado = document.getElementById('nuevoAlumnoGrado').value;
+  const grupo = document.getElementById('nuevoAlumnoGrupo').value;
+  const nombre = document.getElementById('nuevoAlumnoNombre').value.trim();
+  
+  if(!id){ toast('Ingresa un ID para el alumno','error'); return; }
+  if(!nombre){ toast('Ingresa el nombre del alumno','error'); return; }
+  
+  // Verifica si el ID ya existe
+  if(portal.registroAlumnos.some(a => a.id === id)){
+    toast('Ya existe un alumno con ese ID','error');
+    return;
+  }
+  
+  portal.registroAlumnos.push({
+    id: id,
+    name: normalizeStudentName(nombre),
+    grado: grado,
+    grupo: grupo,
+    phone: '',
+    manual: true
+  });
+  
+  saveStore();
+  renderTeacherContent();
+  toast('Alumno agregado correctamente ✓', 'success');
+}
+
+function eliminarAlumno(id){
+  if(!confirm('¿Eliminar este alumno del registro?')) return;
+  portal.registroAlumnos = portal.registroAlumnos.filter(a => a.id !== id);
+  saveStore();
+  renderTeacherContent();
+  toast('Alumno eliminado', 'success');
+}
+
+function editarAlumno(id){
+  const alumno = portal.registroAlumnos.find(a => a.id === id);
+  if(!alumno){
+    toast('Alumno no encontrado','error');
+    return;
+  }
+  
+  openModal(`
+    <div class="modal-head">
+      <h3>✏️ Editar Alumno</h3>
+      <span class="modal-close" onclick="closeModal()">×</span>
+    </div>
+    <div class="modal-body">
+      <div class="form-row">
+        <div class="form-group">
+          <label>ID del Alumno</label>
+          <input type="text" id="editAlumnoId" value="${escHtml(alumno.id)}" readonly style="background:#eee;cursor:not-allowed">
+          <small style="color:var(--muted);font-size:.75rem">El ID no se puede modificar</small>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="grid-column:span 2">
+          <label>Nombre completo</label>
+          <input type="text" id="editAlumnoNombre" value="${escHtml(alumno.name)}" placeholder="Apellido Paterno, Materno, Nombres">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Grado</label>
+          <select id="editAlumnoGrado">
+            <option value="1" ${alumno.grado==='1'?'selected':''}>1° Primero</option>
+            <option value="2" ${alumno.grado==='2'?'selected':''}>2° Segundo</option>
+            <option value="3" ${alumno.grado==='3'?'selected':''}>3° Tercero</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Grupo</label>
+          <select id="editAlumnoGrupo">
+            <option value="A" ${alumno.grupo==='A'?'selected':''}>A</option>
+            <option value="B" ${alumno.grupo==='B'?'selected':''}>B</option>
+            <option value="C" ${alumno.grupo==='C'?'selected':''}>C</option>
+            <option value="D" ${alumno.grupo==='D'?'selected':''}>D</option>
+            <option value="E" ${alumno.grupo==='E'?'selected':''}>E</option>
+            <option value="F" ${alumno.grupo==='F'?'selected':''}>F</option>
+          </select>
+        </div>
+      </div>
+      <div style="background:var(--soft);border-radius:10px;padding:1rem;margin-top:1rem">
+        <p style="font-size:.85rem;color:var(--ink2);margin:0">
+          <strong>📍 Ubicación actual:</strong> ${gradoLabel(alumno.grado)} Grupo ${alumno.grupo}
+          ${alumno.originalGroup ? `<br><span style="color:var(--muted)">Importado de: ${escHtml(alumno.originalGroup)}</span>` : ''}
+        </p>
+      </div>
+      <div class="btn-row" style="margin-top:1.5rem">
+        <button class="btn btn-green" onclick="guardarEdicionAlumno('${alumno.id}')">✔️ Guardar cambios</button>
+        <button class="btn btn-sec" onclick="closeModal()">Cancelar</button>
+      </div>
+    </div>
+  `);
+}
+
+function guardarEdicionAlumno(id){
+  const alumno = portal.registroAlumnos.find(a => a.id === id);
+  if(!alumno){
+    toast('Alumno no encontrado','error');
+    closeModal();
+    return;
+  }
+  
+  const nuevoNombre = document.getElementById('editAlumnoNombre').value.trim();
+  const nuevoGrado = document.getElementById('editAlumnoGrado').value;
+  const nuevoGrupo = document.getElementById('editAlumnoGrupo').value;
+  
+  if(!nuevoNombre){
+    toast('El nombre no puede estar vacío','error');
+    return;
+  }
+  
+  const gradoAnterior = alumno.grado;
+  const grupoAnterior = alumno.grupo;
+  
+  // Actualizar datos
+  alumno.name = normalizeStudentName(nuevoNombre);
+  alumno.grado = nuevoGrado;
+  alumno.grupo = nuevoGrupo;
+  
+  saveStore();
+  closeModal();
+  renderTeacherContent();
+  
+  // Mensaje informativo si cambió de grupo
+  if(gradoAnterior !== nuevoGrado || grupoAnterior !== nuevoGrupo){
+    toast(`✓ Alumno movido de ${gradoLabel(gradoAnterior)} ${grupoAnterior} → ${gradoLabel(nuevoGrado)} ${nuevoGrupo}`, 'success');
+  } else {
+    toast('Alumno actualizado ✓', 'success');
+  }
+}
+
+function clearAlumnos(){
+  if(!confirm('¿Estás seguro de borrar todo el registro de alumnos?')) return;
+  portal.registroAlumnos = [];
+  saveStore();
+  renderTeacherContent();
+  toast('Registro borrado', 'success');
+}
+
+function guardarRegistroAlumnos(){
+  saveStore();
+  syncToFirebase(true);
+  toast('✓ Registro guardado y sincronizado con Firebase', 'success');
+}
+
+function exportarAlumnos(){
+  if(!portal.registroAlumnos.length){
+    toast('No hay alumnos para exportar','error');
+    return;
+  }
+  
+  const data = {
+    exportedAt: new Date().toISOString(),
+    totalAlumnos: portal.registroAlumnos.length,
+    alumnos: portal.registroAlumnos
+  };
+  
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `registro_alumnos_${new Date().toISOString().slice(0,10)}.json`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  toast('Archivo descargado ✓', 'success');
+}
+
+function integrarConCalificaciones(){
+  if(!portal.registroAlumnos.length){
+    toast('No hay alumnos en el registro','error');
+    return;
+  }
+  
+  // Organiza alumnos en grupos compatibles con el sistema de calificaciones
+  const groupsMap = {};
+  
+  portal.registroAlumnos.forEach(a => {
+    const groupName = `${gradoLabel(a.grado)} Grupo ${a.grupo}`;
+    const key = `${a.grado}-${a.grupo}`;
+    
+    if(!groupsMap[key]){
+      groupsMap[key] = {
+        id: 'g_' + uid(),
+        name: groupName,
+        grado: a.grado,
+        students: [],
+        activities: [],
+        grades: {},
+        conduct: {},
+        hwStatus: {}
+      };
+    }
+    
+    groupsMap[key].students.push({
+      id: a.id,
+      name: a.name,
+      qrCode: a.id // Usa el ID como código QR por defecto
+    });
+  });
+  
+  const newGroups = Object.values(groupsMap);
+  
+  // Integra con calif existente o crea nuevo
+  if(portal.calif && portal.calif.groups){
+    // Merge: actualiza estudiantes en grupos existentes o agrega nuevos grupos
+    const existingGroupKeys = new Set(
+      portal.calif.groups.map(g => `${g.grado}-${parseGrupoLetter(g.name)}`)
+    );
+    
+    newGroups.forEach(ng => {
+      const key = `${ng.grado}-${parseGrupoLetter(ng.name)}`;
+      const existing = portal.calif.groups.find(g => 
+        g.grado == ng.grado && parseGrupoLetter(g.name) === parseGrupoLetter(ng.name)
+      );
+      
+      if(existing){
+        // Agrega estudiantes que no existan
+        const existingIds = new Set(existing.students.map(s => s.id));
+        ng.students.forEach(s => {
+          if(!existingIds.has(s.id)){
+            existing.students.push(s);
+          }
+        });
+      } else {
+        portal.calif.groups.push(ng);
+      }
+    });
+    
+    toast(`Integrado: ${newGroups.length} grupos actualizados/agregados`, 'success');
+  } else {
+    portal.calif = {
+      groups: newGroups,
+      importedAt: new Date().toISOString()
+    };
+    toast(`Creado nuevo registro con ${newGroups.length} grupos`, 'success');
+  }
+  
+  saveStore();
+  syncToFirebase(true);
+  renderTeacherContent();
 }
 
 // ── MATERIALES ──
