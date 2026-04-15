@@ -766,10 +766,28 @@ function loginStudent(){
     document.getElementById('sErr').textContent = msg;
     return;
   }
-  // ── FIX: store grado as String to prevent strict === mismatch with number from JSON ──
+  
+  // Buscar grado y grupo en el registro de alumnos primero
+  let grado = '';
+  let grupo = '';
+  const alumnoRegistrado = (portal.registroAlumnos || []).find(a => 
+    a.id === match.student.id || 
+    a.id === match.student.qrCode ||
+    a.name.toLowerCase().trim() === match.student.name.toLowerCase().trim()
+  );
+  
+  if(alumnoRegistrado){
+    grado = alumnoRegistrado.grado || '';
+    grupo = alumnoRegistrado.grupo || '';
+  } else {
+    // Fallback: intentar extraer del grupo de calificaciones
+    grado = String(match.group.grado || '');
+    grupo = parseGrupoLetter(match.group.name);
+  }
+  
   session = { role:'student', code, label:match.student.name,
-              grado: String(match.group.grado || ''),
-              grupo: parseGrupoLetter(match.group.name),
+              grado: grado,
+              grupo: grupo,
               studentId: match.student.id };
   showApp();
 }
@@ -790,8 +808,27 @@ function loginParent(){
     document.getElementById('pErr').textContent = msg;
     return;
   }
+  
+  // Buscar grado y grupo en el registro de alumnos
+  let grado = '';
+  let grupo = '';
+  const alumnoRegistrado = (portal.registroAlumnos || []).find(a => 
+    a.id === match.student.id || 
+    a.id === match.student.qrCode ||
+    a.name.toLowerCase().trim() === match.student.name.toLowerCase().trim()
+  );
+  
+  if(alumnoRegistrado){
+    grado = alumnoRegistrado.grado || '';
+    grupo = alumnoRegistrado.grupo || '';
+  } else {
+    grado = String(match.group.grado || '');
+    grupo = parseGrupoLetter(match.group.name);
+  }
+  
   session = { role:'parent', code, label:'Padre de '+match.student.name,
-              studentName:match.student.name, studentId:match.student.id };
+              studentName:match.student.name, studentId:match.student.id,
+              grado: grado, grupo: grupo };
   showApp();
 }
 
@@ -1243,9 +1280,11 @@ function renderAlumnosTable(){
           <table class="grades-table" style="min-width:auto">
             <thead>
               <tr>
-                <th style="width:60px;text-align:center">#</th>
-                <th style="width:80px">ID</th>
+                <th style="width:50px;text-align:center">#</th>
+                <th style="width:70px">ID</th>
                 <th>Nombre del Alumno</th>
+                <th style="width:70px;text-align:center">Grado</th>
+                <th style="width:70px;text-align:center">Grupo</th>
                 <th style="width:100px;text-align:center">Acciones</th>
               </tr>
             </thead>
@@ -1255,6 +1294,8 @@ function renderAlumnosTable(){
                   <td style="text-align:center;color:var(--muted)">${idx + 1}</td>
                   <td><code style="background:var(--soft);padding:3px 8px;border-radius:5px;font-weight:600;color:var(--accent2)">${escHtml(a.id)}</code></td>
                   <td style="font-weight:500">${escHtml(a.name)}</td>
+                  <td style="text-align:center"><span class="pill pill-grado">${gradoLabel(a.grado)}</span></td>
+                  <td style="text-align:center"><span class="pill pill-grupo">${a.grupo}</span></td>
                   <td style="text-align:center">
                     <button class="btn btn-blue btn-small" onclick="editarAlumno('${a.id}')" title="Editar">✏️</button>
                     <button class="btn btn-danger btn-small" onclick="eliminarAlumno('${a.id}')" title="Eliminar">🗑️</button>
@@ -2289,7 +2330,13 @@ function renderStudentContent(){
     const groups = { link:[], doc:[], image:[], game:[] };
     mine.forEach(m=>{ if(groups[m.type]) groups[m.type].push(m); });
     const labels = { link:'🔗 Enlaces web', doc:'📄 Documentos', image:'🖼️ Imágenes', game:'🎮 Juegos' };
-    let html = `<div class="panel"><h3>Hola, ${escHtml(session.label)} 👋</h3><p class="sub">Grado: ${gradoLabel(session.grado)} · Grupo: ${grupoLabel(session.grupo)}</p></div>`;
+    const gradoGrupoInfo = (session.grado && session.grupo) 
+      ? `<span class="pill pill-grado">${gradoLabel(session.grado)}</span> <span class="pill pill-grupo">Grupo ${session.grupo}</span>` 
+      : `<span style="color:var(--muted)">Grado y grupo no asignados</span>`;
+    let html = `<div class="panel" style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);border:1.5px solid #22c55e">
+      <h3 style="margin-bottom:.3rem">Hola, ${escHtml(session.label)} 👋</h3>
+      <p class="sub" style="margin:0;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">${gradoGrupoInfo}</p>
+    </div>`;
     const anyShown = Object.values(groups).some(arr=>arr.length);
     if(!anyShown){
       html += `<div class="empty"><div class="big">📭</div><p>Tu maestro aún no ha publicado materiales para tu grupo.</p></div>`;
@@ -2594,8 +2641,11 @@ function renderParentGrades(groups){
   }
   const sel=session._trimSel;
   const labels={'1':'1° Trimestre','2':'2° Trimestre','3':'3° Trimestre','todos':'Todos los trimestres'};
+  const gradoGrupoInfo = (session.grado && session.grupo) 
+    ? `<span class="pill pill-grado" style="margin-left:.8rem">${gradoLabel(session.grado)}</span><span class="pill pill-grupo">${session.grupo}</span>` 
+    : '';
   const selectorHtml=`<div class="panel" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
-    <h3 style="margin:0;flex:1;min-width:200px">📊 Calificaciones de ${escHtml(session.studentName)}</h3>
+    <h3 style="margin:0;flex:1;min-width:200px">📊 Calificaciones de ${escHtml(session.studentName)} ${gradoGrupoInfo}</h3>
     <div style="display:flex;align-items:center;gap:.6rem">
       <label style="font-size:.78rem;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em">Filtrar:</label>
       <select onchange="changeTrimSel(this.value)" style="padding:9px 14px;border:2px solid var(--accent2);border-radius:9px;background:#fff;font-family:inherit;font-size:.9rem;font-weight:600;color:var(--ink);cursor:pointer;outline:none">
