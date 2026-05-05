@@ -444,11 +444,36 @@ let portal = {
   exams: [],          // [{id,title,desc,grado,grupo,questions:[{q,opts:[],correct}],visible}]
   calif: null,        // imported JSON from Registro (contains .groups)
   examResults: [],    // [{studentCode,studentName,examId,score,total,date}]
-  registroAlumnos: [] // [{id,name,grado,grupo,phone,originalGroup}]
+  registroAlumnos: [], // [{id,name,grado,grupo,phone,originalGroup}]
+  activities: [],     // [{id,title,desc,grado,grupo,dueDate,attachments:[{type,name,content,filename}],createdAt,visible}]
+  submissions: []     // [{id,activityId,studentCode,studentName,studentGrado,studentGrupo,files:[{name,content,size,mime}],note,submittedAt,updatedAt}]
 };
 let session = null;   // {role,label} | null
 
-function saveStore(){ localStorage.setItem(STORE_KEY, JSON.stringify(portal)); syncToFirebase(); }
+function _persistLocal(){
+  try{
+    const cached = {...portal};
+    if(session && session.role==='teacher'){
+      // Teacher: don't cache submissions in localStorage (they live in Firebase)
+      cached.submissions = [];
+    } else if(session && session.role==='student'){
+      // Student: only cache own submissions
+      cached.submissions = (portal.submissions||[]).filter(s=> _normCode(s.studentCode)===_normCode(session.code));
+    }
+    localStorage.setItem(STORE_KEY, JSON.stringify(cached));
+  }catch(e){
+    console.warn('localStorage error (probably full):', e);
+    try{
+      const minimal = {...portal, submissions: []};
+      localStorage.setItem(STORE_KEY, JSON.stringify(minimal));
+    }catch(e2){ console.error('localStorage failed completely',e2); }
+  }
+}
+
+function saveStore(){
+  _persistLocal();
+  syncToFirebase();
+}
 function loadStore(){
   try{
     const raw = localStorage.getItem(STORE_KEY);
@@ -459,6 +484,8 @@ function loadStore(){
       if(!portal.exams) portal.exams = [];
       if(!portal.examResults) portal.examResults = [];
       if(!portal.registroAlumnos) portal.registroAlumnos = [];
+      if(!portal.activities) portal.activities = [];
+      if(!portal.submissions) portal.submissions = [];
     }
   }catch(e){console.error(e)}
 }
@@ -498,8 +525,8 @@ function loadFirebaseSDK(){
   return new Promise((resolve, reject) => {
     if(typeof firebase !== 'undefined' && firebase.database){ resolve(); return; }
     const cdns = [
-      'https://www.gstatic.com/firebasejs/12.11.0/',
       'https://cdnjs.cloudflare.com/ajax/libs/firebase/12.3.0/',
+      'https://www.gstatic.com/firebasejs/11.10.0/',
       'https://www.gstatic.com/firebasejs/10.14.1/',
       'https://cdnjs.cloudflare.com/ajax/libs/firebase/10.14.1/'
     ];
@@ -561,7 +588,7 @@ function initFirebase(){
 
 function subscribeFirebase(){
   if(!fbReady) return;
-  // Teacher data (materials, exams, calif, registroAlumnos)
+  // Teacher data (materials, exams, calif, registroAlumnos, activities)
   fbDb.ref('portal/data').on('value', snap=>{
     const v = snap.val();
     if(v){
@@ -569,9 +596,10 @@ function subscribeFirebase(){
       portal.materials = v.materials || [];
       portal.exams = v.exams || [];
       portal.registroAlumnos = v.registroAlumnos || [];
+      portal.activities = v.activities || [];
       // Only overwrite calif from portal/data if calificaciones/data hasn't pushed yet
       if(v.calif && !portal._califFromRegistro) portal.calif = v.calif;
-      localStorage.setItem(STORE_KEY, JSON.stringify(portal));
+      _persistLocal();
       suppressSync = false;
       if(session && (session.role==='teacher' || session.role==='student' || session.role==='parent')){
         if(session.role==='teacher') renderTeacherContent();
@@ -592,7 +620,7 @@ function subscribeFirebase(){
         _liveSync: true
       };
       portal._califFromRegistro = true;
-      localStorage.setItem(STORE_KEY, JSON.stringify(portal));
+      _persistLocal();
       suppressSync = false;
       if(session){
         if(session.role==='parent') {
@@ -613,12 +641,38 @@ function subscribeFirebase(){
     if(v){
       suppressSync = true;
       portal.examResults = Object.values(v);
-      localStorage.setItem(STORE_KEY, JSON.stringify(portal));
+      _persistLocal();
       suppressSync = false;
       if(session && session.role==='teacher') renderTeacherContent();
       if(session && session.role==='student') renderStudentContent();
     } else {
       portal.examResults = [];
+    }
+  });
+  // ── Submissions (entregas) — separate path, atomic pushes per student ──
+  fbDb.ref('portal/submissions').on('value', snap=>{
+    const v = snap.val();
+    const prevCount = (portal.submissions||[]).length;
+    suppressSync = true;
+    portal.submissions = v ? Object.values(v) : [];
+    _persistLocal();
+    suppressSync = false;
+    if(session){
+      if(session.role==='teacher'){
+        renderTeacherContent();
+        // Flash teacher view if a new submission came in
+        if(portal.submissions.length > prevCount && prevCount>0){
+          toast('📥 Nueva entrega recibida','success');
+          setTimeout(()=>{
+            document.querySelectorAll('.content .panel').forEach(p=>{
+              p.classList.remove('flash-update');
+              void p.offsetWidth;
+              p.classList.add('flash-update');
+            });
+          },30);
+        }
+      }
+      else if(session.role==='student') renderStudentContent();
     }
   });
 }
@@ -645,6 +699,7 @@ function syncToFirebase(immediate){
       exams: portal.exams || [],
       calif: portal.calif || null,
       registroAlumnos: portal.registroAlumnos || [],
+      activities: portal.activities || [],
       updatedAt: Date.now()
     }).catch(err=>{
       console.error('Sync error',err);
@@ -663,6 +718,30 @@ function pushExamResult(result){
   }
 }
 
+// ── Submissions (entregas de alumnos) ──
+function pushSubmissionFB(submission){
+  return new Promise((resolve, reject)=>{
+    if(!fbReady || !fbConnected){
+      // Save locally only — will sync next time online
+      resolve(null);
+      return;
+    }
+    // Use a deterministic key per (activityId, studentCode) so re-uploads overwrite
+    const safeCode = String(submission.studentCode||'').replace(/[^a-zA-Z0-9_-]/g,'_');
+    const key = submission.activityId + '__' + safeCode;
+    fbDb.ref('portal/submissions/' + key).set(submission)
+      .then(()=>resolve(key))
+      .catch(err=>{ console.error('Push submission error',err); reject(err); });
+  });
+}
+
+function deleteSubmissionFB(activityId, studentCode){
+  if(!fbReady || !fbConnected) return Promise.resolve();
+  const safeCode = String(studentCode||'').replace(/[^a-zA-Z0-9_-]/g,'_');
+  const key = activityId + '__' + safeCode;
+  return fbDb.ref('portal/submissions/' + key).remove();
+}
+
 function forcePublish(){
   if(!fbReady){ toast('Firebase no se inicializó','error'); return; }
   if(!fbConnected){ toast('Sin conexión a Firebase','error'); return; }
@@ -671,6 +750,7 @@ function forcePublish(){
     exams: portal.exams || [],
     calif: portal.calif || null,
     registroAlumnos: portal.registroAlumnos || [],
+    activities: portal.activities || [],
     updatedAt: Date.now()
   }).then(()=>{
     toast('Publicado a Firebase ✓','success');
@@ -890,6 +970,7 @@ function renderTeacherTabs(){
     {id:'calif', label:'📊 Calificaciones'},
     {id:'alumnos', label:'👥 Registro de Alumnos'},
     {id:'materials', label:'📁 Materiales'},
+    {id:'activities', label:'📌 Actividades'},
     {id:'exams', label:'📝 Exámenes'},
     {id:'visibility', label:'👁️ Visibilidad'},
     {id:'io', label:'💾 Importar / Exportar'}
@@ -905,6 +986,7 @@ function renderTeacherContent(){
   if(teacherTab==='calif') c.innerHTML = viewCalif();
   else if(teacherTab==='alumnos') c.innerHTML = viewAlumnos();
   else if(teacherTab==='materials') c.innerHTML = viewMaterials();
+  else if(teacherTab==='activities') c.innerHTML = viewActivities();
   else if(teacherTab==='exams') c.innerHTML = viewExams();
   else if(teacherTab==='visibility') c.innerHTML = viewVisibility();
   else if(teacherTab==='io') c.innerHTML = viewIO();
@@ -2341,10 +2423,501 @@ function importPortal(e){
 }
 function wipePortal(){
   if(!confirm('¿Borrar TODO el contenido del portal? Esta acción no se puede deshacer.')) return;
-  if(!confirm('Confirma de nuevo: se eliminarán materiales, exámenes, calificaciones y resultados.')) return;
-  portal = { materials:[], exams:[], calif:null, examResults:[] };
-  saveStore(); renderTeacherContent();
+  if(!confirm('Confirma de nuevo: se eliminarán materiales, actividades, exámenes, calificaciones y entregas.')) return;
+  portal = { materials:[], exams:[], calif:null, examResults:[], registroAlumnos:[], activities:[], submissions:[] };
+  saveStore();
+  // Also wipe submissions in Firebase
+  if(fbReady && fbConnected){
+    fbDb.ref('portal/submissions').remove().catch(()=>{});
+  }
+  renderTeacherContent();
   toast('Portal borrado','success');
+}
+
+/* ═══════════════════════════════════════════
+   ACTIVIDADES (Tareas con entregas)
+═══════════════════════════════════════════ */
+const ACT_FILE_LIMIT_MB = 6;          // por archivo (entrega del alumno)
+const ACT_ATTACH_LIMIT_MB = 6;        // por adjunto del maestro
+const ACT_MAX_FILES_PER_SUBMISSION = 5;
+
+let activityDraft = {
+  title:'', desc:'', grado:'all', grupo:'all',
+  dueDate:'', // ISO datetime-local
+  attachments: [] // {type:'link'|'file', name, content (url or base64), filename, mime}
+};
+let activitySortBy = 'name'; // 'code' | 'name' | 'grado' | 'grupo' | 'date'
+let activitySortAct = null;  // current activity being viewed in submissions modal
+
+function _fmtDueDate(iso){
+  if(!iso) return '—';
+  try{
+    const d = new Date(iso);
+    if(isNaN(d.getTime())) return iso;
+    const f = d.toLocaleDateString('es-MX',{day:'2-digit',month:'short',year:'numeric'});
+    const h = d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'});
+    return `${f} · ${h}`;
+  }catch(e){ return iso; }
+}
+
+function _dueStatus(dueIso){
+  if(!dueIso) return { status:'none', label:'Sin fecha', cls:'gray' };
+  const d = new Date(dueIso); if(isNaN(d.getTime())) return { status:'none', label:'Sin fecha', cls:'gray' };
+  const now = new Date();
+  const diffMs = d.getTime() - now.getTime();
+  const diffDays = Math.floor(diffMs / (24*60*60*1000));
+  const diffHours = Math.floor(diffMs / (60*60*1000));
+  if(diffMs < 0){
+    return { status:'late', label:'⚠️ Vencida', cls:'red' };
+  }
+  if(diffDays >= 1){
+    return { status:'ok', label:`Faltan ${diffDays} ${diffDays===1?'día':'días'}`, cls:'green' };
+  }
+  if(diffHours >= 1){
+    return { status:'soon', label:`Faltan ${diffHours} ${diffHours===1?'hora':'horas'}`, cls:'orange' };
+  }
+  const mins = Math.max(0, Math.floor(diffMs / 60000));
+  return { status:'soon', label:`Faltan ${mins} min`, cls:'orange' };
+}
+
+function viewActivities(){
+  const draft = activityDraft;
+  const editing = !!draft._editingId;
+  // List
+  const listHtml = renderActivitiesList();
+  // Attachment preview from draft
+  const attHtml = draft.attachments.length ? `
+    <div style="display:flex;flex-direction:column;gap:.5rem;margin-top:.5rem">
+      ${draft.attachments.map((a,i)=>{
+        const icon = a.type==='link'?'🔗':_iconForMime(a.mime||a.filename||'');
+        const sz = a.size?` · ${(a.size/1024).toFixed(0)} KB`:'';
+        const linkPreview = a.type==='link'?`<div style="font-size:.75rem;color:var(--accent2);word-break:break-all;margin-top:.2rem">${escHtml(a.content)}</div>`:'';
+        return `<div class="item" style="padding:.7rem .9rem">
+          <div class="i-icon">${icon}</div>
+          <div class="i-body">
+            <div class="i-title" style="font-size:.92rem">${escHtml(a.name||a.filename||'(sin nombre)')}</div>
+            <div class="i-meta"><span>${a.type==='link'?'Enlace':'Archivo'+sz}</span></div>
+            ${linkPreview}
+          </div>
+          <div class="i-actions">
+            <button class="btn btn-danger btn-small" onclick="removeDraftAttachment(${i})">✕</button>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>` : '<p style="color:var(--muted);font-size:.83rem;margin-top:.4rem">Aún no hay adjuntos. Agrega enlaces o archivos abajo.</p>';
+
+  return `
+    <div class="panel" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:1.5px solid #f59e0b">
+      <h3 style="color:#92400e">📌 Actividades / Tareas para entregar</h3>
+      <p class="sub" style="margin:0">Crea tareas con fecha de entrega. Adjunta enlaces, Word, Excel, PowerPoint, PDF o imágenes. Los alumnos podrán subir uno o varios archivos como entrega y tú los recibirás <strong>en tiempo real</strong>, ordenados por código, nombre, grado o grupo.</p>
+    </div>
+
+    <div class="panel">
+      <h3>${editing?'✏️ Editar actividad':'➕ Crear nueva actividad'}</h3>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Título de la actividad *</label>
+          <input type="text" id="actTitle" value="${escHtml(draft.title)}" oninput="activityDraft.title=this.value" placeholder="Ej: Investigación sobre el hardware">
+        </div>
+        <div class="form-group">
+          <label>Fecha y hora de entrega *</label>
+          <input type="datetime-local" id="actDue" value="${escHtml(draft.dueDate)}" oninput="activityDraft.dueDate=this.value">
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group" style="grid-column:span 2">
+          <label>Descripción / Instrucciones</label>
+          <textarea id="actDesc" oninput="activityDraft.desc=this.value" placeholder="Describe lo que el alumno debe hacer y qué archivos debe entregar...">${escHtml(draft.desc)}</textarea>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Grado destinatario</label>
+          <select id="actGrado" onchange="activityDraft.grado=this.value">
+            <option value="all" ${draft.grado==='all'?'selected':''}>📚 Todos los grados</option>
+            <option value="1" ${draft.grado==='1'?'selected':''}>1° Primero</option>
+            <option value="2" ${draft.grado==='2'?'selected':''}>2° Segundo</option>
+            <option value="3" ${draft.grado==='3'?'selected':''}>3° Tercero</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>Grupo destinatario</label>
+          <select id="actGrupo" onchange="activityDraft.grupo=this.value">
+            <option value="all" ${draft.grupo==='all'?'selected':''}>🗂️ Todos los grupos</option>
+            ${['A','B','C','D','E','F'].map(g=>`<option value="${g}" ${draft.grupo===g?'selected':''}>Grupo ${g}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+
+      <div style="background:var(--soft);padding:1rem 1.2rem;border-radius:10px;margin-top:.5rem">
+        <h3 style="font-size:.95rem;margin-bottom:.6rem">📎 Adjuntos para los alumnos</h3>
+        <p class="sub" style="margin-bottom:.6rem;font-size:.82rem">Puedes incluir enlaces web (YouTube, sitios) y/o archivos (Word, Excel, PowerPoint, PDF, imágenes). Hasta ${ACT_ATTACH_LIMIT_MB} MB por archivo.</p>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Agregar enlace web</label>
+            <div style="display:flex;gap:.4rem">
+              <input type="url" id="actNewLink" placeholder="https://...">
+              <button type="button" class="btn btn-blue btn-small" onclick="addDraftLink()">➕ Agregar</button>
+            </div>
+          </div>
+          <div class="form-group">
+            <label>Agregar archivo (Word/Excel/PPT/PDF/imagen)</label>
+            <input type="file" id="actNewFile" accept=".doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,image/*" multiple onchange="addDraftFiles(event)">
+          </div>
+        </div>
+        ${attHtml}
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="saveActivity()">💾 ${editing?'Actualizar actividad':'Publicar actividad'}</button>
+        ${editing?`<button class="btn btn-danger" onclick="resetActivityDraft()">Cancelar edición</button>`:''}
+      </div>
+    </div>
+
+    ${listHtml}
+  `;
+}
+
+function _iconForMime(mimeOrName){
+  const s = String(mimeOrName||'').toLowerCase();
+  if(s.includes('pdf')) return '📕';
+  if(s.includes('word')||s.endsWith('.doc')||s.endsWith('.docx')||s.includes('msword')||s.includes('officedocument.wordprocessing')) return '📘';
+  if(s.includes('excel')||s.endsWith('.xls')||s.endsWith('.xlsx')||s.includes('spreadsheet')) return '📗';
+  if(s.includes('powerpoint')||s.endsWith('.ppt')||s.endsWith('.pptx')||s.includes('presentation')) return '📙';
+  if(s.startsWith('image/')||/\.(png|jpe?g|gif|webp|bmp|svg)$/.test(s)) return '🖼️';
+  if(s.includes('zip')||s.includes('rar')||s.includes('7z')) return '🗜️';
+  if(s.includes('text')||s.endsWith('.txt')) return '📝';
+  return '📎';
+}
+
+function addDraftLink(){
+  const inp = document.getElementById('actNewLink');
+  const url = (inp.value||'').trim();
+  if(!url){ toast('Escribe un enlace primero','error'); return; }
+  if(!/^https?:\/\//i.test(url)){ toast('El enlace debe empezar con http:// o https://','error'); return; }
+  let displayName = url;
+  try{ const u = new URL(url); displayName = u.hostname + (u.pathname!=='/'?u.pathname:''); }catch(e){}
+  activityDraft.attachments.push({
+    type:'link', name: displayName, content: url
+  });
+  inp.value='';
+  renderTeacherContent();
+}
+
+async function addDraftFiles(e){
+  const files = Array.from(e.target.files||[]);
+  if(!files.length) return;
+  const limit = ACT_ATTACH_LIMIT_MB*1024*1024;
+  for(const f of files){
+    if(f.size > limit){
+      toast(`"${f.name}" es muy grande (máx ${ACT_ATTACH_LIMIT_MB} MB)`,'error');
+      continue;
+    }
+    try{
+      const b64 = await fileToBase64(f);
+      activityDraft.attachments.push({
+        type:'file', name: f.name, filename: f.name,
+        content: b64, size: f.size, mime: f.type||''
+      });
+    }catch(err){ toast(`Error al leer "${f.name}"`,'error'); }
+  }
+  e.target.value = '';
+  renderTeacherContent();
+}
+
+function removeDraftAttachment(idx){
+  activityDraft.attachments.splice(idx,1);
+  renderTeacherContent();
+}
+
+function saveActivity(){
+  const d = activityDraft;
+  if(!d.title.trim()){ toast('Ingresa un título','error'); return; }
+  if(!d.dueDate){ toast('Selecciona la fecha y hora de entrega','error'); return; }
+  if(d.attachments.length===0){
+    if(!confirm('No hay adjuntos. ¿Publicar la actividad solo con descripción?')) return;
+  }
+  if(d._editingId){
+    const idx = portal.activities.findIndex(a=>a.id===d._editingId);
+    if(idx>=0){
+      portal.activities[idx] = {
+        ...portal.activities[idx],
+        title: d.title.trim(),
+        desc: d.desc.trim(),
+        grado: d.grado,
+        grupo: d.grupo,
+        dueDate: d.dueDate,
+        attachments: JSON.parse(JSON.stringify(d.attachments)),
+        updatedAt: new Date().toISOString()
+      };
+      saveStore(); resetActivityDraft();
+      toast('Actividad actualizada ✓','success');
+      return;
+    }
+  }
+  portal.activities.push({
+    id: uid(),
+    title: d.title.trim(),
+    desc: d.desc.trim(),
+    grado: d.grado,
+    grupo: d.grupo,
+    dueDate: d.dueDate,
+    attachments: JSON.parse(JSON.stringify(d.attachments)),
+    createdAt: new Date().toISOString(),
+    visible: true
+  });
+  saveStore();
+  resetActivityDraft();
+  toast('Actividad publicada ✓','success');
+}
+
+function resetActivityDraft(){
+  activityDraft = {
+    title:'', desc:'', grado:'all', grupo:'all',
+    dueDate:'', attachments:[]
+  };
+  if(teacherTab==='activities') renderTeacherContent();
+}
+
+function loadActivityForEdit(id){
+  const a = portal.activities.find(x=>x.id===id);
+  if(!a) return;
+  activityDraft = {
+    _editingId: a.id,
+    title: a.title || '',
+    desc: a.desc || '',
+    grado: a.grado || 'all',
+    grupo: a.grupo || 'all',
+    dueDate: a.dueDate || '',
+    attachments: JSON.parse(JSON.stringify(a.attachments||[]))
+  };
+  renderTeacherContent();
+  window.scrollTo({top:0, behavior:'smooth'});
+  toast('Actividad cargada para edición','success');
+}
+
+function delActivity(id){
+  const a = portal.activities.find(x=>x.id===id);
+  if(!a) return;
+  const nSubs = portal.submissions.filter(s=>s.activityId===id).length;
+  let msg = `¿Eliminar la actividad "${a.title}"?`;
+  if(nSubs>0) msg += `\n\nTambién se eliminarán ${nSubs} entrega(s) recibida(s).`;
+  if(!confirm(msg)) return;
+  portal.activities = portal.activities.filter(x=>x.id!==id);
+  // Delete its submissions
+  const subsToRemove = portal.submissions.filter(s=>s.activityId===id);
+  portal.submissions = portal.submissions.filter(s=>s.activityId!==id);
+  saveStore();
+  // Also remove from Firebase
+  if(fbReady && fbConnected){
+    subsToRemove.forEach(s=>{
+      const safeCode = String(s.studentCode||'').replace(/[^a-zA-Z0-9_-]/g,'_');
+      fbDb.ref('portal/submissions/' + s.activityId + '__' + safeCode).remove().catch(()=>{});
+    });
+  }
+  renderTeacherContent();
+  toast('Actividad eliminada','success');
+}
+
+function toggleActivity(id){
+  const a = portal.activities.find(x=>x.id===id);
+  if(a){ a.visible = !a.visible; saveStore(); renderTeacherContent(); }
+}
+
+function renderActivitiesList(){
+  if(!portal.activities.length){
+    return `<div class="empty"><div class="big">📌</div><p>Aún no hay actividades creadas.<br>Crea la primera arriba.</p></div>`;
+  }
+  // Sort: most recent first
+  const acts = [...portal.activities].sort((a,b)=>{
+    const da = new Date(a.createdAt||0).getTime();
+    const db = new Date(b.createdAt||0).getTime();
+    return db - da;
+  });
+  return `<div class="panel"><h3>📋 Actividades publicadas (${portal.activities.length})</h3><div class="item-list">${
+    acts.map(a=>{
+      const subs = portal.submissions.filter(s=>s.activityId===a.id);
+      const due = _dueStatus(a.dueDate);
+      const dueColor = due.cls==='red'?'#ef4444':due.cls==='orange'?'#f59e0b':due.cls==='green'?'#10b981':'#888';
+      const grado = a.grado==='all' ? 'Todos los grados' : gradoLabel(a.grado);
+      const grupo = a.grupo==='all' ? 'Todos los grupos' : 'Grupo '+a.grupo;
+      const nAtt = (a.attachments||[]).length;
+      return `<div class="item">
+        <div class="i-icon">📌</div>
+        <div class="i-body">
+          <div class="i-title">${escHtml(a.title)}</div>
+          ${a.desc?`<div style="font-size:.83rem;color:var(--ink2);margin:.15rem 0 .3rem 0">${escHtml(a.desc.slice(0,140))}${a.desc.length>140?'…':''}</div>`:''}
+          <div class="i-meta">
+            <span class="pill pill-grado">${grado}</span>
+            <span class="pill pill-grupo">${grupo}</span>
+            <span style="color:${dueColor};font-weight:600">⏰ ${_fmtDueDate(a.dueDate)} · ${due.label}</span>
+            <span>📎 ${nAtt} adjunto${nAtt===1?'':'s'}</span>
+            <span style="color:var(--accent2);font-weight:600">📥 ${subs.length} entrega${subs.length===1?'':'s'}</span>
+            <span class="pill ${a.visible?'pill-on':'pill-off'}">${a.visible?'● Visible':'○ Oculta'}</span>
+          </div>
+        </div>
+        <div class="i-actions">
+          <label class="switch" title="Mostrar/Ocultar"><input type="checkbox" ${a.visible?'checked':''} onchange="toggleActivity('${a.id}')"><span class="slider"></span></label>
+          <button class="btn btn-blue btn-small" onclick="viewActivitySubmissions('${a.id}')">👁️ Ver entregas (${subs.length})</button>
+          <button class="btn btn-sec btn-small" onclick="loadActivityForEdit('${a.id}')">✏️ Editar</button>
+          <button class="btn btn-danger btn-small" onclick="delActivity('${a.id}')">🗑️</button>
+        </div>
+      </div>`;
+    }).join('')
+  }</div></div>`;
+}
+
+function setSubmissionSort(by){ activitySortBy = by; viewActivitySubmissions(activitySortAct); }
+
+function viewActivitySubmissions(actId){
+  const a = portal.activities.find(x=>x.id===actId);
+  if(!a){ toast('Actividad no encontrada','error'); return; }
+  activitySortAct = actId;
+  const subs = portal.submissions.filter(s=>s.activityId===actId);
+  // Sort
+  const sortBy = activitySortBy || 'name';
+  const sorted = [...subs].sort((x,y)=>{
+    if(sortBy==='code') return String(x.studentCode||'').localeCompare(String(y.studentCode||''));
+    if(sortBy==='grado'){
+      const g = String(x.studentGrado||'').localeCompare(String(y.studentGrado||''));
+      if(g!==0) return g;
+      const gp = String(x.studentGrupo||'').localeCompare(String(y.studentGrupo||''));
+      if(gp!==0) return gp;
+      return String(x.studentName||'').localeCompare(String(y.studentName||''));
+    }
+    if(sortBy==='grupo'){
+      const gp = String(x.studentGrupo||'').localeCompare(String(y.studentGrupo||''));
+      if(gp!==0) return gp;
+      return String(x.studentName||'').localeCompare(String(y.studentName||''));
+    }
+    if(sortBy==='date'){
+      return new Date(y.submittedAt||0).getTime() - new Date(x.submittedAt||0).getTime();
+    }
+    // default: name
+    return String(x.studentName||'').localeCompare(String(y.studentName||''));
+  });
+
+  // Find non-submitters from registroAlumnos that match grado/grupo
+  const eligibleAlumnos = (portal.registroAlumnos||[]).filter(al=>{
+    const gOk = a.grado==='all' || String(a.grado)===String(al.grado);
+    const gpOk = a.grupo==='all' || String(a.grupo).toUpperCase()===String(al.grupo||'').toUpperCase();
+    return gOk && gpOk;
+  });
+  const submittedCodes = new Set(subs.map(s=>_normCode(s.studentCode)));
+  const noSubmit = eligibleAlumnos.filter(al=>!submittedCodes.has(_normCode(al.id)));
+
+  const due = _dueStatus(a.dueDate);
+  const grado = a.grado==='all' ? 'Todos los grados' : gradoLabel(a.grado);
+  const grupo = a.grupo==='all' ? 'Todos los grupos' : 'Grupo '+a.grupo;
+
+  const rowsHtml = sorted.length ? sorted.map(s=>{
+    const dt = new Date(s.submittedAt||0);
+    const isLate = a.dueDate && dt.getTime() > new Date(a.dueDate).getTime();
+    const stamp = isNaN(dt.getTime())?'—':dt.toLocaleString('es-MX');
+    const filesHtml = (s.files||[]).map((f,i)=>`
+      <div style="display:flex;align-items:center;gap:.5rem;padding:6px 10px;background:var(--soft);border-radius:7px;margin:.2rem 0">
+        <span>${_iconForMime(f.mime||f.name||'')}</span>
+        <span style="flex:1;font-size:.82rem;word-break:break-all">${escHtml(f.name||'(sin nombre)')}</span>
+        <span style="font-size:.72rem;color:var(--muted)">${f.size?(f.size/1024).toFixed(0)+' KB':''}</span>
+        <button class="btn btn-blue btn-small" onclick="downloadSubmissionFile('${s.id}',${i})">⬇️</button>
+      </div>
+    `).join('');
+    return `<tr>
+      <td><code style="background:var(--soft);padding:3px 9px;border-radius:5px;font-weight:700;color:var(--accent)">${escHtml(s.studentCode||'')}</code></td>
+      <td><strong>${escHtml(s.studentName||'')}</strong></td>
+      <td style="text-align:center"><span class="pill pill-grado">${gradoLabel(s.studentGrado)}</span></td>
+      <td style="text-align:center"><span class="pill pill-grupo">${escHtml(s.studentGrupo||'—')}</span></td>
+      <td>${filesHtml||'<span style="color:var(--muted)">Sin archivos</span>'}</td>
+      <td style="font-size:.78rem">${escHtml(stamp)}${isLate?'<br><span style="color:var(--red);font-weight:700">⚠️ Tardía</span>':''}</td>
+      <td style="font-size:.8rem;max-width:180px">${escHtml(s.note||'')}</td>
+    </tr>`;
+  }).join('') : `<tr><td colspan="7" style="text-align:center;padding:1.5rem;color:var(--muted)">Aún no hay entregas para esta actividad.</td></tr>`;
+
+  const noSubmitHtml = noSubmit.length ? `
+    <div style="margin-top:1rem;padding:1rem;background:#fff7ee;border:1.5px solid #f0c080;border-radius:10px">
+      <strong style="color:var(--orange)">⚠️ Alumnos que aún no entregan (${noSubmit.length})</strong>
+      <p class="sub" style="margin:.4rem 0;font-size:.82rem">Basado en el Registro de Alumnos.</p>
+      <div style="display:flex;flex-wrap:wrap;gap:.4rem;max-height:160px;overflow-y:auto">
+        ${noSubmit.map(al=>`<span class="pill pill-off" title="${escHtml(al.id)}">${escHtml(al.name)} <span style="opacity:.6">${gradoLabel(al.grado)}${al.grupo}</span></span>`).join('')}
+      </div>
+    </div>` : '';
+
+  const html = `
+    <div class="modal-head">
+      <h3>📥 Entregas: ${escHtml(a.title)}</h3>
+      <span class="modal-close" onclick="closeModal()">×</span>
+    </div>
+    <div class="modal-body">
+      <div style="display:flex;flex-wrap:wrap;gap:.5rem;margin-bottom:1rem;font-size:.85rem">
+        <span class="pill pill-grado">${grado}</span>
+        <span class="pill pill-grupo">${grupo}</span>
+        <span style="padding:3px 11px;border-radius:100px;background:#eef;color:#345;font-weight:600">⏰ ${_fmtDueDate(a.dueDate)}</span>
+        <span style="padding:3px 11px;border-radius:100px;background:#e0ecff;color:var(--accent2);font-weight:700">📥 ${subs.length} entregas</span>
+      </div>
+      <div style="display:flex;align-items:center;gap:.5rem;flex-wrap:wrap;margin-bottom:.8rem">
+        <label style="font-size:.78rem;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em">Ordenar por:</label>
+        <select onchange="setSubmissionSort(this.value)" style="padding:8px 12px;border:2px solid var(--accent2);border-radius:8px;background:#fff;font-family:inherit;font-size:.85rem;font-weight:600">
+          <option value="name" ${sortBy==='name'?'selected':''}>👤 Nombre</option>
+          <option value="code" ${sortBy==='code'?'selected':''}>🔑 Código</option>
+          <option value="grado" ${sortBy==='grado'?'selected':''}>🎓 Grado y grupo</option>
+          <option value="grupo" ${sortBy==='grupo'?'selected':''}>📂 Grupo</option>
+          <option value="date" ${sortBy==='date'?'selected':''}>🕐 Fecha (más recientes)</option>
+        </select>
+        ${sorted.length?`<button class="btn btn-green btn-small" style="margin-left:auto" onclick="downloadAllSubmissions('${actId}')">⬇️ Descargar todas</button>`:''}
+      </div>
+      <div style="overflow-x:auto;border-radius:10px;border:1px solid var(--line)">
+        <table class="grades-table" style="min-width:760px;margin:0">
+          <thead>
+            <tr>
+              <th>Código</th>
+              <th>Nombre</th>
+              <th style="text-align:center">Grado</th>
+              <th style="text-align:center">Grupo</th>
+              <th>Archivos</th>
+              <th>Fecha de entrega</th>
+              <th>Nota</th>
+            </tr>
+          </thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </div>
+      ${noSubmitHtml}
+    </div>
+  `;
+  openModal(html);
+}
+
+function downloadSubmissionFile(submissionId, fileIdx){
+  const s = portal.submissions.find(x=>x.id===submissionId);
+  if(!s){ toast('Entrega no encontrada','error'); return; }
+  const f = (s.files||[])[fileIdx];
+  if(!f || !f.content){ toast('Archivo no disponible','error'); return; }
+  const a = document.createElement('a');
+  a.href = f.content;
+  a.download = f.name || ('archivo_'+(fileIdx+1));
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+
+function downloadAllSubmissions(actId){
+  const subs = portal.submissions.filter(s=>s.activityId===actId);
+  if(!subs.length){ toast('No hay entregas','error'); return; }
+  // Trigger download of each file with a slight delay
+  let i=0;
+  subs.forEach(s=>{
+    (s.files||[]).forEach((f, idx)=>{
+      setTimeout(()=>{
+        const a = document.createElement('a');
+        // Prefix filename with student name & grade for organization
+        const cleanName = String(s.studentName||'alumno').replace(/[^a-zA-Z0-9_-]+/g,'_');
+        const prefix = `${cleanName}_${s.studentGrado||''}${s.studentGrupo||''}_`;
+        a.href = f.content;
+        a.download = prefix + (f.name||('archivo_'+(idx+1)));
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+      }, i*180);
+      i++;
+    });
+  });
+  toast(`Descargando ${i} archivo(s)…`,'success');
 }
 
 /* ═══════════════════════════════════════════
@@ -2355,6 +2928,7 @@ let studentTab = 'materials';
 function renderStudentTabs(){
   const tabs = [
     {id:'materials', label:'📁 Materiales'},
+    {id:'activities', label:'📌 Tareas'},
     {id:'exams', label:'📝 Exámenes'}
   ];
   document.getElementById('tabs').innerHTML = tabs.map(t=>`<button class="tab ${studentTab===t.id?'active':''}" onclick="setStudentTab('${t.id}')">${t.label}</button>`).join('');
@@ -2410,6 +2984,8 @@ function renderStudentContent(){
       }
     }
     c.innerHTML = html;
+  } else if(studentTab==='activities'){
+    c.innerHTML = renderStudentActivities();
   } else if(studentTab==='exams'){
     const mine = portal.exams.filter(matchesStudent);
     if(!mine.length){
@@ -2428,6 +3004,261 @@ function renderStudentContent(){
       }).join('')
     }</div></div>`;
   }
+}
+
+function renderStudentActivities(){
+  const mine = (portal.activities||[]).filter(matchesStudent);
+  const gradoGrupoInfo = (session.grado && session.grupo) 
+    ? `<span class="pill pill-grado">${gradoLabel(session.grado)}</span> <span class="pill pill-grupo">Grupo ${session.grupo}</span>` 
+    : `<span style="color:var(--muted)">Grado y grupo no asignados</span>`;
+
+  let html = `<div class="panel" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:1.5px solid #f59e0b">
+    <h3 style="color:#92400e;margin-bottom:.3rem">📌 Mis tareas</h3>
+    <p class="sub" style="margin:0;display:flex;align-items:center;gap:.5rem;flex-wrap:wrap">${gradoGrupoInfo} · ${mine.length} tarea${mine.length===1?'':'s'} para ti</p>
+  </div>`;
+
+  if(!mine.length){
+    return html + `<div class="empty"><div class="big">📭</div><p>No tienes tareas pendientes por ahora.<br>¡Buen trabajo! 🎉</p></div>`;
+  }
+
+  // Sort: pending (non-overdue) first by due date asc, then overdue, then submitted
+  const sorted = [...mine].sort((a,b)=>{
+    const subA = portal.submissions.find(s=>s.activityId===a.id && _normCode(s.studentCode)===_normCode(session.code));
+    const subB = portal.submissions.find(s=>s.activityId===b.id && _normCode(s.studentCode)===_normCode(session.code));
+    if(!!subA !== !!subB) return subA?1:-1; // not submitted first
+    const dA = a.dueDate ? new Date(a.dueDate).getTime() : Infinity;
+    const dB = b.dueDate ? new Date(b.dueDate).getTime() : Infinity;
+    return dA - dB;
+  });
+
+  html += sorted.map(a=>renderStudentActivityCard(a)).join('');
+  return html;
+}
+
+function renderStudentActivityCard(a){
+  const sub = portal.submissions.find(s=>s.activityId===a.id && _normCode(s.studentCode)===_normCode(session.code));
+  const due = _dueStatus(a.dueDate);
+  const dueColor = due.cls==='red'?'#ef4444':due.cls==='orange'?'#f59e0b':due.cls==='green'?'#10b981':'#888';
+  const isLate = due.status==='late';
+  const submitted = !!sub;
+
+  // Status badge
+  let statusBadge = '';
+  if(submitted){
+    const dt = new Date(sub.submittedAt||0);
+    const submittedLate = a.dueDate && dt.getTime() > new Date(a.dueDate).getTime();
+    statusBadge = submittedLate
+      ? `<span style="background:linear-gradient(135deg,#f59e0b,#b45309);color:#fff;padding:5px 14px;border-radius:100px;font-weight:700;font-size:.78rem">⏰ Entregada con retraso</span>`
+      : `<span style="background:linear-gradient(135deg,#10b981,#047857);color:#fff;padding:5px 14px;border-radius:100px;font-weight:700;font-size:.78rem">✅ Entregada</span>`;
+  } else if(isLate){
+    statusBadge = `<span style="background:linear-gradient(135deg,#ef4444,#991b1b);color:#fff;padding:5px 14px;border-radius:100px;font-weight:700;font-size:.78rem">⚠️ Vencida sin entregar</span>`;
+  } else {
+    statusBadge = `<span style="background:linear-gradient(135deg,#3b82f6,#1e40af);color:#fff;padding:5px 14px;border-radius:100px;font-weight:700;font-size:.78rem">📝 Pendiente</span>`;
+  }
+
+  // Attachments from teacher
+  const atts = (a.attachments||[]).map((att,i)=>{
+    const icon = att.type==='link'?'🔗':_iconForMime(att.mime||att.filename||att.name||'');
+    if(att.type==='link'){
+      return `<a href="${escHtml(att.content)}" target="_blank" rel="noopener" class="item" style="text-decoration:none;color:inherit;cursor:pointer">
+        <div class="i-icon">${icon}</div>
+        <div class="i-body">
+          <div class="i-title" style="font-size:.92rem">${escHtml(att.name||att.content)}</div>
+          <div class="i-meta"><span style="color:var(--accent2)">Abrir enlace ↗</span></div>
+        </div>
+      </a>`;
+    }
+    return `<div class="item" onclick="downloadActivityAttachment('${a.id}',${i})" style="cursor:pointer">
+      <div class="i-icon">${icon}</div>
+      <div class="i-body">
+        <div class="i-title" style="font-size:.92rem">${escHtml(att.name||att.filename||'(archivo)')}</div>
+        <div class="i-meta"><span>${att.size?(att.size/1024).toFixed(0)+' KB · ':''}Clic para descargar</span></div>
+      </div>
+      <div class="i-actions"><button class="btn btn-blue btn-small">⬇️</button></div>
+    </div>`;
+  }).join('');
+
+  // Submitted files preview
+  let mySubmissionHtml = '';
+  if(submitted){
+    const dt = new Date(sub.submittedAt||0);
+    mySubmissionHtml = `
+      <div style="background:linear-gradient(135deg,#f0fdf4,#dcfce7);border:1.5px solid #22c55e;border-radius:10px;padding:1rem 1.2rem;margin-top:.8rem">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin-bottom:.5rem">
+          <strong style="color:#166534">📤 Mi entrega (${(sub.files||[]).length} archivo${(sub.files||[]).length===1?'':'s'})</strong>
+          <span style="font-size:.78rem;color:#166534">${isNaN(dt.getTime())?'':dt.toLocaleString('es-MX')}</span>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:.35rem">
+        ${(sub.files||[]).map((f,i)=>`
+          <div style="display:flex;align-items:center;gap:.5rem;padding:6px 10px;background:#fff;border-radius:7px">
+            <span>${_iconForMime(f.mime||f.name||'')}</span>
+            <span style="flex:1;font-size:.82rem;word-break:break-all">${escHtml(f.name||'(archivo)')}</span>
+            <span style="font-size:.72rem;color:var(--muted)">${f.size?(f.size/1024).toFixed(0)+' KB':''}</span>
+          </div>
+        `).join('')}
+        </div>
+        ${sub.note?`<div style="margin-top:.5rem;font-size:.82rem;color:#166534;font-style:italic">📝 ${escHtml(sub.note)}</div>`:''}
+      </div>`;
+  }
+
+  // Submission form
+  const canStillSubmit = !isLate; // student can submit/replace until due date
+  const formId = 'subForm_'+a.id;
+  let submitFormHtml = '';
+  if(canStillSubmit){
+    submitFormHtml = `
+      <div style="background:var(--soft);border-radius:10px;padding:1rem 1.2rem;margin-top:.8rem">
+        <h4 style="margin-bottom:.6rem;font-size:.95rem">${submitted?'🔄 Reemplazar mi entrega':'📤 Subir mi entrega'}</h4>
+        <p class="sub" style="font-size:.8rem;margin-bottom:.6rem">Puedes subir hasta ${ACT_MAX_FILES_PER_SUBMISSION} archivos (Word, Excel, PowerPoint, PDF, imágenes…). Máx ${ACT_FILE_LIMIT_MB} MB por archivo.</p>
+        <div class="form-row">
+          <div class="form-group" style="grid-column:span 2">
+            <label>Selecciona uno o varios archivos</label>
+            <input type="file" id="subFiles_${a.id}" multiple accept=".doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,image/*,.txt,.zip">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group" style="grid-column:span 2">
+            <label>Nota para el maestro (opcional)</label>
+            <input type="text" id="subNote_${a.id}" placeholder="Ej: Lo terminé hoy, espero te guste." value="${submitted?escHtml(sub.note||''):''}">
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-primary" onclick="submitActivity('${a.id}')">${submitted?'🔄 Reemplazar entrega':'📤 Enviar entrega'}</button>
+          ${submitted?`<button class="btn btn-danger" onclick="deleteMySubmission('${a.id}')">🗑️ Eliminar mi entrega</button>`:''}
+        </div>
+      </div>`;
+  } else if(!submitted){
+    submitFormHtml = `<div style="background:#fee2e2;border:1.5px solid #ef4444;border-radius:10px;padding:1rem 1.2rem;margin-top:.8rem;color:#991b1b">
+      <strong>⚠️ Esta tarea ya venció</strong>
+      <p style="font-size:.85rem;margin-top:.3rem">No puedes entregar archivos porque la fecha límite ya pasó. Habla con tu maestro si necesitas una extensión.</p>
+    </div>`;
+  } else {
+    // submitted but past due — read-only
+    submitFormHtml = `<p class="sub" style="margin-top:.6rem">La fecha límite ya pasó. Tu entrega quedó registrada con éxito.</p>`;
+  }
+
+  const grado = a.grado==='all' ? 'Todos los grados' : gradoLabel(a.grado);
+  const grupo = a.grupo==='all' ? 'Todos los grupos' : 'Grupo '+a.grupo;
+
+  return `<div class="panel" style="border-left:5px solid ${dueColor}">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:.5rem;margin-bottom:.5rem">
+      <h3 style="margin:0">📌 ${escHtml(a.title)}</h3>
+      ${statusBadge}
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:.4rem;font-size:.82rem;margin-bottom:.6rem">
+      <span class="pill pill-grado">${grado}</span>
+      <span class="pill pill-grupo">${grupo}</span>
+      <span style="padding:3px 11px;border-radius:100px;background:${dueColor}22;color:${dueColor};font-weight:700">⏰ ${_fmtDueDate(a.dueDate)} · ${due.label}</span>
+    </div>
+    ${a.desc?`<p style="color:var(--ink2);margin-bottom:.8rem;line-height:1.5">${escHtml(a.desc)}</p>`:''}
+    ${atts?`<div style="margin-bottom:.4rem"><strong style="font-size:.85rem;color:var(--ink2)">📎 Material de la actividad:</strong></div><div class="item-list" style="margin-bottom:.5rem">${atts}</div>`:''}
+    ${mySubmissionHtml}
+    ${submitFormHtml}
+  </div>`;
+}
+
+function downloadActivityAttachment(actId, idx){
+  const a = portal.activities.find(x=>x.id===actId);
+  if(!a) return;
+  const att = (a.attachments||[])[idx];
+  if(!att) return;
+  if(att.type==='link'){ window.open(att.content,'_blank'); return; }
+  const link = document.createElement('a');
+  link.href = att.content;
+  link.download = att.filename || att.name || 'archivo';
+  document.body.appendChild(link); link.click(); document.body.removeChild(link);
+}
+
+async function submitActivity(actId){
+  const a = portal.activities.find(x=>x.id===actId);
+  if(!a){ toast('Actividad no encontrada','error'); return; }
+  const due = _dueStatus(a.dueDate);
+  if(due.status==='late'){ toast('Esta tarea ya venció','error'); return; }
+  const fileInput = document.getElementById('subFiles_'+actId);
+  const noteInput = document.getElementById('subNote_'+actId);
+  const note = (noteInput?noteInput.value:'').trim();
+  const files = Array.from(fileInput?fileInput.files:[]);
+
+  // Existing submission (for replace)
+  const existing = portal.submissions.find(s=>s.activityId===actId && _normCode(s.studentCode)===_normCode(session.code));
+
+  if(!files.length && !existing){
+    toast('Selecciona al menos un archivo','error');
+    return;
+  }
+  if(files.length > ACT_MAX_FILES_PER_SUBMISSION){
+    toast(`Solo puedes subir hasta ${ACT_MAX_FILES_PER_SUBMISSION} archivos`,'error');
+    return;
+  }
+  // Validate file sizes
+  const limit = ACT_FILE_LIMIT_MB*1024*1024;
+  for(const f of files){
+    if(f.size > limit){
+      toast(`"${f.name}" es muy grande (máx ${ACT_FILE_LIMIT_MB} MB)`,'error');
+      return;
+    }
+  }
+
+  toast('Subiendo entrega…','success');
+
+  let processedFiles = [];
+  if(files.length){
+    try{
+      for(const f of files){
+        const b64 = await fileToBase64(f);
+        processedFiles.push({
+          name: f.name, mime: f.type||'', size: f.size, content: b64
+        });
+      }
+    }catch(err){ toast('Error al leer los archivos','error'); return; }
+  } else if(existing){
+    // No new files: keep existing
+    processedFiles = existing.files || [];
+  }
+
+  const submission = {
+    id: existing ? existing.id : uid(),
+    activityId: actId,
+    studentCode: session.code,
+    studentName: session.label,
+    studentGrado: session.grado || '',
+    studentGrupo: session.grupo || '',
+    files: processedFiles,
+    note,
+    submittedAt: existing ? (existing.submittedAt||new Date().toISOString()) : new Date().toISOString(),
+    updatedAt: new Date().toISOString()
+  };
+
+  // Update local
+  if(existing){
+    const idx = portal.submissions.findIndex(s=>s.id===existing.id);
+    if(idx>=0) portal.submissions[idx] = submission;
+  } else {
+    portal.submissions.push(submission);
+  }
+  _persistLocal();
+
+  // Push to Firebase
+  try{
+    await pushSubmissionFB(submission);
+    toast('✓ Entrega enviada al maestro','success');
+  }catch(err){
+    toast('Guardada localmente, error al sincronizar: '+err.message,'error');
+  }
+  renderStudentContent();
+}
+
+async function deleteMySubmission(actId){
+  if(!confirm('¿Eliminar tu entrega? Podrás volver a subir archivos.')) return;
+  const sub = portal.submissions.find(s=>s.activityId===actId && _normCode(s.studentCode)===_normCode(session.code));
+  if(!sub) return;
+  portal.submissions = portal.submissions.filter(s=>!(s.activityId===actId && _normCode(s.studentCode)===_normCode(session.code)));
+  _persistLocal();
+  try{
+    await deleteSubmissionFB(actId, session.code);
+  }catch(e){ console.warn(e); }
+  renderStudentContent();
+  toast('Entrega eliminada','success');
 }
 
 function openMaterial(id){
@@ -2585,7 +3416,7 @@ function submitExam(){
     score, total: currentExam.questions.length, date: new Date().toISOString()
   };
   portal.examResults.push(result);
-  localStorage.setItem(STORE_KEY, JSON.stringify(portal));
+  _persistLocal();
   pushExamResult(result);
   const calif = ((score/currentExam.questions.length)*10).toFixed(1);
   toast(`Calificación: ${calif} (${score}/${currentExam.questions.length})`,'success');
