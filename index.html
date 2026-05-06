@@ -485,9 +485,16 @@ body.parent-mode .tab.active{
    Datos del registro (importados): dentro de portal.calif
 ═══════════════════════════════════════════════════════════ */
 
-const STORE_KEY = 'portal_v1';
-const TEACHER_USER = 'admin';
-const TEACHER_PASS = '182136';
+// Aviso de doble carga (no rompe la app — la doble carga es responsabilidad del navegador/cache).
+// Las declaraciones top-level usan `var` para tolerar carga duplicada sin SyntaxError.
+if (window.__PORTAL_ESCOLAR_LOADED__) {
+  console.warn('[Portal] Aviso: el script parece haberse cargado dos veces. Si tienes problemas, haz hard refresh (Ctrl+Shift+R) o limpia el caché del navegador.');
+}
+window.__PORTAL_ESCOLAR_LOADED__ = true;
+
+var STORE_KEY = 'portal_v1';
+var TEACHER_USER = 'admin';
+var TEACHER_PASS = '182136';
 
 // ── State ─────────────────────────────────────
 let portal = {
@@ -501,23 +508,83 @@ let portal = {
 };
 let session = null;   // {role,label} | null
 
+/**
+ * Persistir el estado en localStorage con degradación progresiva.
+ * Si el cache se llena, va eliminando datos pesados hasta que entre.
+ * Los datos completos siempre viven en Firebase, así que el cache local
+ * es solo una optimización para arranque rápido y modo offline ligero.
+ */
+function _stripHeavyAttachments(arr){
+  // Para activities y materials: mantener metadata pero quitar contents grandes (>200KB)
+  return (arr||[]).map(item=>{
+    const out = {...item};
+    if(out.content && typeof out.content==='string' && out.content.length>200000){
+      out.content = '__OFFLOADED__'; // placeholder, vendrá de Firebase
+      out._offloaded = true;
+    }
+    if(Array.isArray(out.attachments)){
+      out.attachments = out.attachments.map(at=>{
+        if(at && at.content && typeof at.content==='string' && at.content.length>200000 && at.type!=='link'){
+          return {...at, content:'__OFFLOADED__', _offloaded:true};
+        }
+        return at;
+      });
+    }
+    return out;
+  });
+}
+
 function _persistLocal(){
-  try{
+  // Build the candidate snapshot based on session role
+  const buildSnapshot = (level)=>{
     const cached = {...portal};
-    if(session && session.role==='teacher'){
-      // Teacher: don't cache submissions in localStorage (they live in Firebase)
-      cached.submissions = [];
-    } else if(session && session.role==='student'){
-      // Student: only cache own submissions
+    // LEVEL 0: full (only excluding submissions for teacher)
+    if(session && session.role==='teacher') cached.submissions = [];
+    else if(session && session.role==='student'){
       cached.submissions = (portal.submissions||[]).filter(s=> _normCode(s.studentCode)===_normCode(session.code));
     }
-    localStorage.setItem(STORE_KEY, JSON.stringify(cached));
-  }catch(e){
-    console.warn('localStorage error (probably full):', e);
+    if(level>=1){
+      // LEVEL 1: drop submissions completely (will reload from Firebase)
+      cached.submissions = [];
+    }
+    if(level>=2){
+      // LEVEL 2: strip heavy base64 from materials and activities
+      cached.materials = _stripHeavyAttachments(portal.materials||[]);
+      cached.activities = _stripHeavyAttachments(portal.activities||[]);
+    }
+    if(level>=3){
+      // LEVEL 3: drop calif data too (large) and exam contents
+      cached.calif = null;
+      cached.exams = (portal.exams||[]).map(e=>{
+        const o = {...e};
+        // Keep the exam questions but strip if needed in higher levels
+        return o;
+      });
+    }
+    if(level>=4){
+      // LEVEL 4: minimal — only essentials
+      cached.materials = [];
+      cached.activities = [];
+      cached.exams = [];
+      cached.examResults = [];
+    }
+    return cached;
+  };
+
+  for(let level=0; level<=4; level++){
     try{
-      const minimal = {...portal, submissions: []};
-      localStorage.setItem(STORE_KEY, JSON.stringify(minimal));
-    }catch(e2){ console.error('localStorage failed completely',e2); }
+      localStorage.setItem(STORE_KEY, JSON.stringify(buildSnapshot(level)));
+      if(level>=2 && !_persistLocal._warnedThisSession){
+        console.info('[Portal] Cache local optimizado (los archivos grandes se cargan de Firebase)');
+        _persistLocal._warnedThisSession = true;
+      }
+      return;
+    }catch(e){
+      // QuotaExceededError or similar — try a lighter snapshot
+      if(level===4){
+        console.warn('[Portal] No se pudo guardar nada en localStorage (cuota llena). Todo seguirá funcionando desde Firebase.');
+      }
+    }
   }
 }
 
@@ -537,6 +604,14 @@ function loadStore(){
       if(!portal.registroAlumnos) portal.registroAlumnos = [];
       if(!portal.activities) portal.activities = [];
       if(!portal.submissions) portal.submissions = [];
+      // Drop offloaded placeholders — Firebase will refill them
+      portal.materials = portal.materials.filter(m=>m.content!=='__OFFLOADED__');
+      portal.activities = (portal.activities||[]).map(a=>{
+        if(Array.isArray(a.attachments)){
+          a.attachments = a.attachments.filter(at=>!at._offloaded && at.content!=='__OFFLOADED__');
+        }
+        return a;
+      });
     }
   }catch(e){console.error(e)}
 }
