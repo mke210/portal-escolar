@@ -729,7 +729,7 @@ function subscribeFirebase(){
       suppressSync = false;
       if(session && (session.role==='teacher' || session.role==='student' || session.role==='parent')){
         if(session.role==='teacher') renderTeacherContent();
-        else if(session.role==='student') renderStudentContent();
+        else if(session.role==='student') renderStudentContentSafe();
         else if(session.role==='parent') renderParentContent();
       }
     }
@@ -754,8 +754,8 @@ function subscribeFirebase(){
           if(!isFirstLoad) flashUpdate();
         }
         else if(session.role==='student') {
-          renderStudentContent();
-          if(!isFirstLoad) flashUpdate();
+          renderStudentContentSafe();
+          if(!isFirstLoad && !currentExam) flashUpdate();
         }
         else if(session.role==='teacher') renderTeacherContent();
       }
@@ -770,7 +770,7 @@ function subscribeFirebase(){
       _persistLocal();
       suppressSync = false;
       if(session && session.role==='teacher') renderTeacherContent();
-      if(session && session.role==='student') renderStudentContent();
+      if(session && session.role==='student') renderStudentContentSafe();
     } else {
       portal.examResults = [];
     }
@@ -822,7 +822,7 @@ function subscribeFirebase(){
           },30);
         }
       }
-      else if(session.role==='student') renderStudentContent();
+      else if(session.role==='student') renderStudentContentSafe();
     }
   });
 }
@@ -912,6 +912,17 @@ function forcePublish(){
 
 // Initialize Firebase on page load
 initFirebase();
+
+// Advertencia al cerrar/recargar si el alumno tiene un examen en curso con respuestas
+window.addEventListener('beforeunload', function(e){
+  if(currentExam && Array.isArray(examAnswers) && examAnswers.some(a=>a>=0)){
+    // Guardar progreso justo antes de cerrar (defensa)
+    try{ _saveExamProgress(); }catch(err){}
+    e.preventDefault();
+    e.returnValue = 'Tienes un examen en curso. Si sales ahora, tus respuestas seguirán guardadas pero deberás volver a entrar al examen.';
+    return e.returnValue;
+  }
+});
 
 // ── Utils ─────────────────────────────────────
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,8); }
@@ -3419,7 +3430,21 @@ function renderStudentTabs(){
   document.getElementById('tabs').innerHTML = tabs.map(t=>`<button class="tab ${studentTab===t.id?'active':''}" onclick="setStudentTab('${t.id}')">${t.label}</button>`).join('');
   renderStudentContent();
 }
-function setStudentTab(id){ studentTab=id; renderStudentTabs(); }
+function setStudentTab(id){
+  // Si el alumno está en medio de un examen, confirmar antes de salir
+  if(currentExam && id!==studentTab){
+    const answered = examAnswers.filter(a=>a>=0).length;
+    if(answered>0){
+      if(!confirm(`Tienes un examen en curso con ${answered} respuesta${answered===1?'':'s'}. Si cambias de pestaña, tu progreso quedará guardado y podrás continuar después.\n\n¿Deseas salir del examen?`)) return;
+    }
+    // Salir del examen pero CONSERVAR el progreso guardado en localStorage
+    // (no llamamos a _clearExamProgress aquí, así puede volver)
+    currentExam = null;
+    examAnswers = [];
+  }
+  studentTab=id;
+  renderStudentTabs();
+}
 
 /*
  * ── FIX: matchesStudent ──────────────────────────────────────────────────────
@@ -3859,26 +3884,91 @@ function _gmSetup(){
 let currentExam = null;
 let examAnswers = [];
 
+/**
+ * Versión segura de renderStudentContent: NO regenera el DOM si el alumno
+ * está contestando un examen. Esto evita que actualizaciones de Firebase
+ * (otro alumno entrega algo, el maestro publica un material, etc.) saquen
+ * al alumno del examen y le borren sus respuestas seleccionadas.
+ */
+function renderStudentContentSafe(){
+  if(currentExam){
+    // Solo refrescar respuestas marcadas (manteniendo el DOM del examen).
+    // Como las respuestas están en el state local, no es necesario tocar el DOM.
+    return;
+  }
+  renderStudentContent();
+}
+
+function _examProgressKey(examId){
+  return 'examProgress_v1_' + (session?String(session.code||'_'):'_') + '_' + examId;
+}
+function _saveExamProgress(){
+  if(!currentExam || !session) return;
+  try{
+    localStorage.setItem(_examProgressKey(currentExam.id), JSON.stringify({
+      answers: examAnswers,
+      ts: Date.now()
+    }));
+  }catch(e){ /* quota — no crítico, el progreso está en memoria */ }
+}
+function _loadExamProgress(examId){
+  if(!session) return null;
+  try{
+    const raw = localStorage.getItem(_examProgressKey(examId));
+    if(raw) return JSON.parse(raw);
+  }catch(e){}
+  return null;
+}
+function _clearExamProgress(examId){
+  if(!session || !examId) return;
+  try{ localStorage.removeItem(_examProgressKey(examId)); }catch(e){}
+}
+
 function startExam(id){
   const e = portal.exams.find(x=>x.id===id);
   if(!e) return;
+  // Bloquear si ya tiene un resultado registrado en Firebase
+  const existingResult = portal.examResults.find(r=>r.examId===id && _normCode(r.studentCode)===_normCode(session.code));
+  if(existingResult){
+    showExamDone(id);
+    return;
+  }
   currentExam = e;
-  examAnswers = new Array(e.questions.length).fill(-1);
+  // Intentar recuperar progreso guardado
+  const saved = _loadExamProgress(id);
+  if(saved && Array.isArray(saved.answers) && saved.answers.length===e.questions.length){
+    examAnswers = saved.answers.slice();
+    const answered = examAnswers.filter(a=>a>=0).length;
+    if(answered>0){
+      toast(`Continuando examen (${answered}/${e.questions.length} respondidas)`, 'success');
+    }
+  } else {
+    examAnswers = new Array(e.questions.length).fill(-1);
+  }
   renderExamTake();
 }
+
 function renderExamTake(){
   const c = document.getElementById('content');
   const e = currentExam;
+  const answered = examAnswers.filter(a=>a>=0).length;
   c.innerHTML = `
+    <div class="panel" style="background:linear-gradient(135deg,#fef3c7,#fde68a);border:1.5px solid #f59e0b">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.5rem">
+        <h3 style="color:#92400e;margin:0">📝 Examen en curso</h3>
+        <span style="background:#fff;padding:5px 14px;border-radius:100px;font-weight:700;color:#92400e;font-size:.82rem" id="examProgressBadge">Progreso: ${answered}/${e.questions.length}</span>
+      </div>
+      <p class="sub" style="margin:.4rem 0 0 0;font-size:.83rem">Tus respuestas se guardan automáticamente. Si se cierra la pestaña por accidente, podrás continuar donde te quedaste.</p>
+    </div>
     <div class="panel">
-      <h3>📝 ${escHtml(e.title)}</h3>
+      <h3>${escHtml(e.title)}</h3>
       ${e.desc?`<p class="sub">${escHtml(e.desc)}</p>`:''}
       <div id="qWrap">${e.questions.map((q,i)=>`
         <div class="exam-q">
           <h4>${i+1}. ${escHtml(q.q)}</h4>
           <div class="exam-opts">${q.opts.map((o,j)=>`
             <label class="exam-opt ${examAnswers[i]===j?'selected':''}">
-              <input type="radio" name="q${i}" ${examAnswers[i]===j?'checked':''} onchange="examAnswers[${i}]=${j};document.querySelectorAll('.exam-opts input[name=q${i}]').forEach((el,k)=>el.closest('.exam-opt').classList.toggle('selected',k===${j}))">
+              <input type="radio" name="q${i}" ${examAnswers[i]===j?'checked':''} onchange="_pickExamAnswer(${i},${j})">
               <span>${escHtml(o)}</span>
             </label>
           `).join('')}</div>
@@ -3891,9 +3981,43 @@ function renderExamTake(){
     </div>
   `;
 }
-function cancelExam(){ currentExam=null; examAnswers=[]; renderStudentContent(); }
+
+// Handler único para seleccionar una respuesta — guarda progreso automáticamente
+function _pickExamAnswer(qIdx, optIdx){
+  examAnswers[qIdx] = optIdx;
+  // Actualizar UI de la pregunta sin re-renderizar todo
+  document.querySelectorAll(`.exam-opts input[name=q${qIdx}]`).forEach((el,k)=>{
+    el.closest('.exam-opt').classList.toggle('selected', k===optIdx);
+  });
+  // Actualizar badge de progreso
+  const badge = document.getElementById('examProgressBadge');
+  if(badge && currentExam){
+    const answered = examAnswers.filter(a=>a>=0).length;
+    badge.textContent = `Progreso: ${answered}/${currentExam.questions.length}`;
+  }
+  // Persistir progreso en localStorage
+  _saveExamProgress();
+}
+
+function cancelExam(){
+  if(currentExam){
+    const answered = examAnswers.filter(a=>a>=0).length;
+    if(answered>0){
+      if(!confirm(`¿Cancelar el examen? Tienes ${answered} respuesta${answered===1?'':'s'} sin enviar y se perderán.`)) return;
+    }
+    _clearExamProgress(currentExam.id);
+  }
+  currentExam = null;
+  examAnswers = [];
+  renderStudentContent();
+}
+
 function submitExam(){
-  if(examAnswers.some(a=>a<0)){ if(!confirm('Hay preguntas sin contestar. ¿Enviar de todas formas?')) return; }
+  if(!currentExam) return;
+  if(examAnswers.some(a=>a<0)){
+    const missing = examAnswers.filter(a=>a<0).length;
+    if(!confirm(`Hay ${missing} pregunta${missing===1?'':'s'} sin contestar. ¿Enviar de todas formas?`)) return;
+  }
   let score = 0;
   currentExam.questions.forEach((q,i)=>{ if(examAnswers[i]===q.correct) score++; });
   const result = {
@@ -3905,12 +4029,17 @@ function submitExam(){
   pushExamResult(result);
   const calif = ((score/currentExam.questions.length)*10).toFixed(1);
   toast(`Calificación: ${calif} (${score}/${currentExam.questions.length})`,'success');
-  currentExam = null; examAnswers = [];
+  const examId = currentExam.id;
+  currentExam = null;
+  examAnswers = [];
+  _clearExamProgress(examId);
   renderStudentContent();
 }
+
 function showExamDone(id){
   const e = portal.exams.find(x=>x.id===id);
-  const r = portal.examResults.find(x=>x.examId===id && x.studentCode===session.code);
+  const r = portal.examResults.find(x=>x.examId===id && _normCode(x.studentCode)===_normCode(session.code));
+  if(!e || !r) return;
   openModal(`
     <div class="modal-head"><h3>${escHtml(e.title)}</h3><span class="modal-close" onclick="closeModal()">×</span></div>
     <div class="modal-body" style="text-align:center">
