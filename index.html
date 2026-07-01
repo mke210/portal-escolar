@@ -252,7 +252,7 @@ input,select,textarea{font-family:inherit;font-size:14px}
   .tabs{padding:0 .8rem}
 }
 
-/* ═══════════ PARENT MODE — youthful, animated, formal ═══════════ */
+/* ═══════════════ PARENT MODE — youthful, animated, formal ═══════════ */
 body.parent-mode{
   background:linear-gradient(135deg,#1e3c72 0%,#2a5298 25%,#7e22ce 50%,#2a5298 75%,#1e3c72 100%);
   background-size:400% 400%;
@@ -2056,14 +2056,14 @@ async function saveMaterial(){
     } else if(type==='doc' || type==='image'){
       const file = document.getElementById('mFile').files[0];
       if(!file){ toast('Selecciona un archivo','error'); return; }
-      if(file.size > 8*1024*1024){ toast('Archivo muy grande (máx 8 MB)','error'); return; }
+      if(file.size > 20*1024*1024){ toast('Archivo muy grande (máx 20 MB)','error'); return; }
       content = await fileToBase64(file);
       filename = file.name;
     } else if(type==='game'){
       const file = document.getElementById('mFile').files[0];
       const code = document.getElementById('mHtmlCode').value.trim();
       if(file){
-        if(file.size > 4*1024*1024){ toast('HTML muy grande (máx 4 MB)','error'); return; }
+        if(file.size > 20*1024*1024){ toast('HTML muy grande (máx 20 MB)','error'); return; }
         content = await fileToText(file);
         filename = file.name;
       } else if(code){
@@ -2600,8 +2600,9 @@ function wipePortal(){
 /* ═══════════════════════════════════════════
    ACTIVIDADES (Tareas con entregas)
 ═══════════════════════════════════════════ */
-const ACT_FILE_LIMIT_MB = 6;          // por archivo (entrega del alumno)
-const ACT_ATTACH_LIMIT_MB = 6;        // por adjunto del maestro
+// Límite de archivos modificado: 20 MB para entregas de alumnos y adjuntos del maestro
+const ACT_FILE_LIMIT_MB = 20;          // por archivo (entrega del alumno)
+const ACT_ATTACH_LIMIT_MB = 20;        // por adjunto del maestro
 const ACT_MAX_FILES_PER_SUBMISSION = 5;
 
 let activityDraft = {
