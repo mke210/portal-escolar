@@ -4091,8 +4091,16 @@ function getStudentInGroup(g){
   return (g.students||[]).find(s=>s.qrCode&&_normCode(s.qrCode)===_normCode(session.code));
 }
 function calcAvgForStudent(g,sid){
+  // Si el docente capturó un promedio manual en el Registro, ese tiene prioridad
+  // (antes este chequeo no existía y por eso el promedio manual no se veía en el Portal)
+  if(g.manualAvg && g.manualAvg[sid]!==undefined && g.manualAvg[sid]!==''){
+    const m=parseFloat(g.manualAvg[sid]);
+    if(!isNaN(m)) return m;
+  }
   if(!g.activities||!g.grades) return null;
   let sum=0,cnt=0;
+  const totalActivities=g.activities.length;
+  if(totalActivities===0) return null;
   g.activities.forEach(a=>{
     const v=g.grades[sid+'_'+a.id];
     if(v!==undefined&&v!==null&&v!==''){
@@ -4104,7 +4112,9 @@ function calcAvgForStudent(g,sid){
       if(!isNaN(n)){ sum+=n; cnt++; }
     }
   });
-  return cnt>0?(sum/cnt):null;
+  // Mismo criterio que el Registro: se divide entre el TOTAL de actividades
+  // (no solo las capturadas) y se redondea a entero — igual que calcAvg() en Index.html.
+  return cnt>0?Math.round(sum/totalActivities):null;
 }
 
 function renderParentContent(){
