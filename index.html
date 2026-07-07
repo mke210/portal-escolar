@@ -252,7 +252,7 @@ input,select,textarea{font-family:inherit;font-size:14px}
   .tabs{padding:0 .8rem}
 }
 
-/* ═══════════════ PARENT MODE — youthful, animated, formal ═══════════ */
+/* ═══════════ PARENT MODE — youthful, animated, formal ═══════════ */
 body.parent-mode{
   background:linear-gradient(135deg,#1e3c72 0%,#2a5298 25%,#7e22ce 50%,#2a5298 75%,#1e3c72 100%);
   background-size:400% 400%;
@@ -2600,9 +2600,8 @@ function wipePortal(){
 /* ═══════════════════════════════════════════
    ACTIVIDADES (Tareas con entregas)
 ═══════════════════════════════════════════ */
-// Se ha aumentado el límite de archivos a 20 MB para los alumnos y para los adjuntos del maestro
-const ACT_FILE_LIMIT_MB = 20;          // por archivo (entrega del alumno) - Aumentado de 6 a 20
-const ACT_ATTACH_LIMIT_MB = 20;        // por adjunto del maestro - Aumentado de 6 a 20
+const ACT_FILE_LIMIT_MB = 6;          // por archivo (entrega del alumno)
+const ACT_ATTACH_LIMIT_MB = 6;        // por adjunto del maestro
 const ACT_MAX_FILES_PER_SUBMISSION = 5;
 
 let activityDraft = {
