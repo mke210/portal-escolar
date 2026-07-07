@@ -4304,6 +4304,13 @@ function renderParentConduct(groups){
   return html;
 }
 
+// Formatea el promedio EXACTAMENTE igual que el Registro (Reporte Final):
+// trunca a 2 decimales (no redondea) para que padres y docente vean el mismo número.
+function _fmtProm(v){
+  if(v===null||v===undefined||isNaN(v)) return '—';
+  return (Math.trunc(v*100)/100).toFixed(2);
+}
+
 function renderParentSummary(groups){
   const byName={};
   groups.forEach(g=>{ const k=g.name.replace(/\s*·\s*Trim.*$/,'').trim(); if(!byName[k]) byName[k]={}; byName[k][g.trimestre||'—']=g; });
@@ -4316,12 +4323,13 @@ function renderParentSummary(groups){
       const g=trims[t]; if(!g) return '<td class="num">—</td>';
       const s=getStudentInGroup(g); if(!s) return '<td class="num">—</td>';
       const avg=calcAvgForStudent(g,s.id);
-      return `<td class="num">${_chipCalif(avg!==null?avg.toFixed(1):'')}</td>`;
+      // Mismo criterio visual que el Registro: número entero por trimestre (sin decimales)
+      return `<td class="num">${_chipCalif(avg!==null?String(Math.round(avg)):'')}</td>`;
     }).join('');
     let finalAvg=null;
     const avgs=['1','2','3'].map(t=>{ const g=trims[t]; if(!g) return null; const s=getStudentInGroup(g); if(!s) return null; return calcAvgForStudent(g,s.id); }).filter(x=>x!==null);
     if(avgs.length) finalAvg=avgs.reduce((a,b)=>a+b,0)/avgs.length;
-    html+=`<div class="panel"><div class="grades-wrap"><table class="grades-table"><thead><tr><th>Materia</th><th class="num"><span class="trim-chip t1">T1</span></th><th class="num"><span class="trim-chip t2">T2</span></th><th class="num"><span class="trim-chip t3">T3</span></th><th class="final">Final</th></tr></thead><tbody><tr><td><strong>${escHtml(name)}</strong></td>${cells}<td class="final">${_chipCalif(finalAvg!==null?finalAvg.toFixed(1):'')}</td></tr></tbody></table></div></div>`;
+    html+=`<div class="panel"><div class="grades-wrap"><table class="grades-table"><thead><tr><th>Materia</th><th class="num"><span class="trim-chip t1">T1</span></th><th class="num"><span class="trim-chip t2">T2</span></th><th class="num"><span class="trim-chip t3">T3</span></th><th class="final">Final</th></tr></thead><tbody><tr><td><strong>${escHtml(name)}</strong></td>${cells}<td class="final">${_chipCalif(finalAvg!==null?_fmtProm(finalAvg):'')}</td></tr></tbody></table></div></div>`;
   });
   return html;
 }
