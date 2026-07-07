@@ -4091,21 +4091,32 @@ function getStudentGroups(){
 function getStudentInGroup(g){
   return (g.students||[]).find(s=>s.qrCode&&_normCode(s.qrCode)===_normCode(session.code));
 }
-function calcAvgForStudent(g,sid){
-  if(!g.activities||!g.grades) return null;
-  let sum=0,cnt=0;
-  g.activities.forEach(a=>{
-    const v=g.grades[sid+'_'+a.id];
-    if(v!==undefined&&v!==null&&v!==''){
-      let n=NaN;
-      if(typeof v==='string'&&v.startsWith('T:')) n=parseFloat(v.slice(2));
-      else if(typeof v==='string'&&v.startsWith('IN:')) n=parseFloat(v.slice(3));
-      else if(v==='NE') n=0;
-      else n=parseFloat(v);
-      if(!isNaN(n)){ sum+=n; cnt++; }
+
+/* ═══════════════════════════════════════════
+   ⭐ CORRECCIÓN: calcAvgForStudent ahora prioriza promedio manual
+   ═══════════════════════════════════════════ */
+function calcAvgForStudent(g, sid) {
+  // 1. Verificar si existe promedio manual
+  if (g.manualAvg && g.manualAvg[sid] !== undefined && g.manualAvg[sid] !== '') {
+    const val = parseFloat(g.manualAvg[sid]);
+    if (!isNaN(val)) return val;
+  }
+
+  // 2. Si no hay manual, calcular a partir de las actividades
+  if (!g.activities || !g.grades) return null;
+  let sum = 0, cnt = 0;
+  g.activities.forEach(a => {
+    const v = g.grades[sid + '_' + a.id];
+    if (v !== undefined && v !== null && v !== '') {
+      let n = NaN;
+      if (typeof v === 'string' && v.startsWith('T:')) n = parseFloat(v.slice(2));
+      else if (typeof v === 'string' && v.startsWith('IN:')) n = parseFloat(v.slice(3));
+      else if (v === 'NE') n = 0;
+      else n = parseFloat(v);
+      if (!isNaN(n)) { sum += n; cnt++; }
     }
   });
-  return cnt>0?(sum/cnt):null;
+  return cnt > 0 ? (sum / cnt) : null;
 }
 
 function renderParentContent(){
