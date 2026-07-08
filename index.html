@@ -3423,6 +3423,7 @@ let studentTab = 'materials';
 
 function renderStudentTabs(){
   const tabs = [
+    {id:'grades', label:'📋 Calificaciones'},
     {id:'materials', label:'📁 Materiales'},
     {id:'activities', label:'📌 Tareas'},
     {id:'exams', label:'📝 Exámenes'}
@@ -3464,7 +3465,14 @@ function matchesStudent(item){
 
 function renderStudentContent(){
   const c = document.getElementById('content');
-  if(studentTab==='materials'){
+  if(studentTab==='grades'){
+    const groups = getStudentGroups();
+    if(!groups.length){
+      c.innerHTML = `<div class="empty"><div class="big">📭</div><p>Aún no hay calificaciones registradas para ti.</p></div>`;
+      return;
+    }
+    c.innerHTML = renderParentGrades(groups);
+  } else if(studentTab==='materials'){
     const mine = portal.materials.filter(matchesStudent);
     const groups = { link:[], doc:[], image:[], game:[] };
     mine.forEach(m=>{ if(groups[m.type]) groups[m.type].push(m); });
@@ -4079,8 +4087,8 @@ function renderParentTabs(){
   document.getElementById('tabs').innerHTML=tabs.map(t=>`<button class="tab ${parentTab===t.id?'active':''}" onclick="setParentTab('${t.id}')">${t.label}</button>`).join('');
 }
 function setParentTab(id){ parentTab=id; renderParentTabs(); renderParentContent(); }
-function changeTrimSel(val){ if(!session) return; session._trimSel=val; renderParentContent(); }
-function changeTrimSelTasks(val){ if(!session) return; session._trimSelTasks=val; renderParentContent(); }
+function changeTrimSel(val){ if(!session) return; session._trimSel=val; if(session.role==='student') renderStudentContent(); else renderParentContent(); }
+function changeTrimSelTasks(val){ if(!session) return; session._trimSelTasks=val; if(session.role==='student') renderStudentContent(); else renderParentContent(); }
 
 function getStudentGroups(){
   if(!portal.calif||!portal.calif.groups) return [];
@@ -4156,7 +4164,7 @@ function renderParentGrades(groups){
     ? `<span class="pill pill-grado" style="margin-left:.8rem">${gradoLabel(session.grado)}</span><span class="pill pill-grupo">${session.grupo}</span>` 
     : '';
   const selectorHtml=`<div class="panel" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
-    <h3 style="margin:0;flex:1;min-width:200px">📋 Lista de actividades de ${escHtml(session.studentName)} ${gradoGrupoInfo}</h3>
+    <h3 style="margin:0;flex:1;min-width:200px">📋 Lista de actividades de ${escHtml(session.studentName||session.label)} ${gradoGrupoInfo}</h3>
     <div style="display:flex;align-items:center;gap:.6rem">
       <label style="font-size:.78rem;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em">Filtrar:</label>
       <select onchange="changeTrimSel(this.value)" style="padding:9px 14px;border:2px solid var(--accent2);border-radius:9px;background:#fff;font-family:inherit;font-size:.9rem;font-weight:600;color:var(--ink);cursor:pointer;outline:none">
@@ -4254,7 +4262,7 @@ function renderParentTasks(groups){
   
   // Selector de trimestre
   const selectorHtml=`<div class="panel" style="display:flex;align-items:center;gap:1rem;flex-wrap:wrap">
-    <h3 style="margin:0;flex:1;min-width:200px">📝 Tareas de ${escHtml(session.studentName)}</h3>
+    <h3 style="margin:0;flex:1;min-width:200px">📝 Tareas de ${escHtml(session.studentName||session.label)}</h3>
     <div style="display:flex;align-items:center;gap:.6rem">
       <label style="font-size:.78rem;font-weight:700;color:var(--ink2);text-transform:uppercase;letter-spacing:.04em">Filtrar:</label>
       <select onchange="changeTrimSelTasks(this.value)" style="padding:9px 14px;border:2px solid var(--accent2);border-radius:9px;background:#fff;font-family:inherit;font-size:.9rem;font-weight:600;color:var(--ink);cursor:pointer;outline:none">
@@ -4273,7 +4281,7 @@ function renderParentTasks(groups){
     <div class="stat red"><div class="label">❌ No entregadas</div><div class="value">${pendiente}</div></div>
   </div>`;
   
-  if(!filas.length) return `${selectorHtml}<div class="panel"><h3>📋 Reporte detallado</h3><p class="sub">Sin tareas para ${escHtml(session.studentName)} en este trimestre.</p></div>${stats}`;
+  if(!filas.length) return `${selectorHtml}<div class="panel"><h3>📋 Reporte detallado</h3><p class="sub">Sin tareas para ${escHtml(session.studentName||session.label)} en este trimestre.</p></div>${stats}`;
   
   const filasHtml=filas.map(f=>{
     const stTxt=f.est==='entregado'?'<span style="color:#10b981;font-weight:700">✅ Entregada</span>':f.est==='tarde'?'<span style="color:#f59e0b;font-weight:700">⏰ Con retardo</span>':f.est==='pendiente'?'<span style="color:#ef4444;font-weight:700">❌ No entregada</span>':'<span style="color:#bbb">—</span>';
@@ -4314,7 +4322,7 @@ function _fmtProm(v){
 function renderParentSummary(groups){
   const byName={};
   groups.forEach(g=>{ const k=g.name.replace(/\s*·\s*Trim.*$/,'').trim(); if(!byName[k]) byName[k]={}; byName[k][g.trimestre||'—']=g; });
-  let html=`<div class="panel"><h3>🏆 Resumen final por trimestre</h3><p class="sub">Promedio de ${escHtml(session.studentName)} en cada materia</p></div>`;
+  let html=`<div class="panel"><h3>🏆 Resumen final por trimestre</h3><p class="sub">Promedio de ${escHtml(session.studentName||session.label)} en cada materia</p></div>`;
   const keys=Object.keys(byName);
   if(!keys.length) return html+'<div class="empty"><div class="big">📊</div><p>Sin datos</p></div>';
   keys.forEach(name=>{
