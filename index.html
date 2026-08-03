@@ -504,7 +504,9 @@ let portal = {
   examResults: [],    // [{studentCode,studentName,examId,score,total,date}]
   registroAlumnos: [], // [{id,name,grado,grupo,phone,originalGroup}]
   activities: [],     // [{id,title,desc,grado,grupo,dueDate,attachments:[{type,name,content,filename}],createdAt,visible}]
-  submissions: []     // [{id,activityId,studentCode,studentName,studentGrado,studentGrupo,files:[{name,content,size,mime}],note,submittedAt,updatedAt}]
+  submissions: [],    // [{id,activityId,studentCode,studentName,studentGrado,studentGrupo,files:[{name,content,size,mime}],note,submittedAt,updatedAt}]
+  rubricas: [],        // [{id,grado,grupo,trimestre,texto,createdAt,updatedAt}] — rúbricas / aprendizajes esperados por grado, grupo y trimestre
+  reflexiones: []       // [{id,studentCode,studentName,grado,grupo,trimestre,texto,registrado,registradoAt,revisado,revisadoAt}] — lo que el alumno escribió que aprendió
 };
 let session = null;   // {role,label} | null
 
@@ -604,6 +606,8 @@ function loadStore(){
       if(!portal.registroAlumnos) portal.registroAlumnos = [];
       if(!portal.activities) portal.activities = [];
       if(!portal.submissions) portal.submissions = [];
+      if(!portal.rubricas) portal.rubricas = [];
+      if(!portal.reflexiones) portal.reflexiones = [];
       // Drop offloaded placeholders — Firebase will refill them
       portal.materials = portal.materials.filter(m=>m.content!=='__OFFLOADED__');
       portal.activities = (portal.activities||[]).map(a=>{
@@ -723,6 +727,7 @@ function subscribeFirebase(){
       portal.exams = v.exams || [];
       portal.registroAlumnos = v.registroAlumnos || [];
       portal.activities = v.activities || [];
+      portal.rubricas = v.rubricas || [];
       // Only overwrite calif from portal/data if calificaciones/data hasn't pushed yet
       if(v.calif && !portal._califFromRegistro) portal.calif = v.calif;
       _persistLocal();
@@ -825,6 +830,18 @@ function subscribeFirebase(){
       else if(session.role==='student') renderStudentContentSafe();
     }
   });
+  // ── Reflexiones de aprendizaje (alumno) — separate path, atomic pushes por alumno+trimestre ──
+  fbDb.ref('portal/reflexiones').on('value', snap=>{
+    const v = snap.val();
+    suppressSync = true;
+    portal.reflexiones = v ? Object.values(v) : [];
+    _persistLocal();
+    suppressSync = false;
+    if(session){
+      if(session.role==='student') renderStudentContentSafe();
+      else if(session.role==='parent'){ renderParentTabs(); renderParentContent(); }
+    }
+  });
 }
 
 // Live flash when remote data updates
@@ -850,6 +867,7 @@ function syncToFirebase(immediate){
       calif: portal.calif || null,
       registroAlumnos: portal.registroAlumnos || [],
       activities: portal.activities || [],
+      rubricas: portal.rubricas || [],
       updatedAt: Date.now()
     }).catch(err=>{
       console.error('Sync error',err);
@@ -892,6 +910,23 @@ function deleteSubmissionFB(activityId, studentCode){
   return fbDb.ref('portal/submissions/' + key).remove();
 }
 
+// ── Reflexiones de aprendizaje (lo que el alumno escribe que aprendió, por trimestre) ──
+function pushReflexionFB(reflexion){
+  return new Promise((resolve, reject)=>{
+    if(!fbReady || !fbConnected){
+      // Guardado local solamente — se sincronizará la próxima vez que haya conexión
+      resolve(null);
+      return;
+    }
+    // Clave determinística por (studentCode, trimestre) para que re-registrar sobreescriba
+    const safeCode = String(reflexion.studentCode||'').replace(/[^a-zA-Z0-9_-]/g,'_');
+    const key = safeCode + '__t' + reflexion.trimestre;
+    fbDb.ref('portal/reflexiones/' + key).set(reflexion)
+      .then(()=>resolve(key))
+      .catch(err=>{ console.error('Push reflexion error',err); reject(err); });
+  });
+}
+
 function forcePublish(){
   if(!fbReady){ toast('Firebase no se inicializó','error'); return; }
   if(!fbConnected){ toast('Sin conexión a Firebase','error'); return; }
@@ -901,6 +936,7 @@ function forcePublish(){
     calif: portal.calif || null,
     registroAlumnos: portal.registroAlumnos || [],
     activities: portal.activities || [],
+    rubricas: portal.rubricas || [],
     updatedAt: Date.now()
   }).then(()=>{
     toast('Publicado a Firebase ✓','success');
@@ -1134,6 +1170,7 @@ function renderTeacherTabs(){
     {id:'activities', label:'📌 Actividades'},
     {id:'entregas', label:'📥 Entregas'},
     {id:'exams', label:'📝 Exámenes'},
+    {id:'rubricas', label:'🎯 Rúbricas y Aprendizajes'},
     {id:'visibility', label:'👁️ Visibilidad'},
     {id:'io', label:'💾 Importar / Exportar'}
   ];
@@ -1151,6 +1188,7 @@ function renderTeacherContent(){
   else if(teacherTab==='activities') c.innerHTML = viewActivities();
   else if(teacherTab==='entregas') c.innerHTML = viewEntregas();
   else if(teacherTab==='exams') c.innerHTML = viewExams();
+  else if(teacherTab==='rubricas') c.innerHTML = viewRubricas();
   else if(teacherTab==='visibility') c.innerHTML = viewVisibility();
   else if(teacherTab==='io') c.innerHTML = viewIO();
 }
@@ -2643,6 +2681,99 @@ function _dueStatus(dueIso){
   return { status:'soon', label:`Faltan ${mins} min`, cls:'orange' };
 }
 
+/* ═══════════════════════════════════════════
+   RÚBRICAS DE EVALUACIÓN / APRENDIZAJES ESPERADOS
+   (por grado, grupo y trimestre — visible para padres)
+═══════════════════════════════════════════ */
+let rubricaGradoSel = '1';
+let rubricaGrupoSel = 'A';
+
+function setRubricaGrado(v){ rubricaGradoSel = v; renderTeacherContent(); }
+function setRubricaGrupo(v){ rubricaGrupoSel = v; renderTeacherContent(); }
+
+function getRubrica(grado, grupo, trimestre){
+  return (portal.rubricas||[]).find(x=>
+    String(x.grado)===String(grado) &&
+    String(x.grupo||'').toUpperCase()===String(grupo||'').toUpperCase() &&
+    Number(x.trimestre)===Number(trimestre)
+  );
+}
+
+function viewRubricas(){
+  const grado = rubricaGradoSel;
+  const grupo = rubricaGrupoSel;
+  let html = `<div class="panel">
+    <h3>🎯 Rúbricas de evaluación y aprendizajes esperados</h3>
+    <p class="sub">Define, por grado, grupo y trimestre (son tres), los aprendizajes esperados y/o la rúbrica de evaluación. Esta información aparecerá automáticamente en el Portal de Padres de Familia.</p>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Grado</label>
+        <select onchange="setRubricaGrado(this.value)">
+          <option value="1" ${grado==='1'?'selected':''}>1° Primero</option>
+          <option value="2" ${grado==='2'?'selected':''}>2° Segundo</option>
+          <option value="3" ${grado==='3'?'selected':''}>3° Tercero</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>Grupo</label>
+        <select onchange="setRubricaGrupo(this.value)">
+          ${['A','B','C','D','E','F'].map(g=>`<option value="${g}" ${grupo===g?'selected':''}>Grupo ${g}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <p class="sub" style="margin:0"><span class="pill pill-grado">${gradoLabel(grado)}</span> <span class="pill pill-grupo">Grupo ${grupo}</span></p>
+  </div>`;
+  [1,2,3].forEach(t=>{ html += rubricaTrimestreBlock(grado, grupo, t); });
+  return html;
+}
+
+function rubricaTrimestreBlock(grado, grupo, trimestre){
+  const r = getRubrica(grado, grupo, trimestre);
+  const texto = r ? r.texto : '';
+  return `
+    <div class="panel">
+      <h3>📘 Trimestre ${trimestre}</h3>
+      <div class="form-group">
+        <label>Aprendizajes esperados / Rúbrica de evaluación</label>
+        <textarea id="rubTxt_${trimestre}" rows="6" placeholder="Escribe aquí los aprendizajes esperados y/o los criterios de evaluación de este trimestre para ${gradoLabel(grado)} Grupo ${grupo}...">${escHtml(texto)}</textarea>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="guardarRubrica(${trimestre})">💾 Guardar</button>
+        ${r ? `<button class="btn btn-danger" onclick="eliminarRubrica('${r.id}')">🗑️ Eliminar</button>` : ''}
+      </div>
+      ${r ? `<p class="sub" style="margin:.7rem 0 0">Última actualización: ${new Date(r.updatedAt).toLocaleString('es-MX')}</p>` : `<p class="sub" style="margin:.7rem 0 0">Aún no has guardado información para este trimestre.</p>`}
+    </div>
+  `;
+}
+
+function guardarRubrica(trimestre){
+  const grado = rubricaGradoSel;
+  const grupo = rubricaGrupoSel;
+  const ta = document.getElementById('rubTxt_'+trimestre);
+  const texto = (ta ? ta.value : '').trim();
+  if(!texto){ toast('Escribe el contenido antes de guardar','error'); return; }
+  let r = getRubrica(grado, grupo, trimestre);
+  const now = new Date().toISOString();
+  if(r){
+    r.texto = texto;
+    r.updatedAt = now;
+  } else {
+    r = { id: uid(), grado, grupo, trimestre: Number(trimestre), texto, createdAt: now, updatedAt: now };
+    portal.rubricas.push(r);
+  }
+  saveStore();
+  toast('✓ Rúbrica guardada — los padres ya pueden verla','success');
+  renderTeacherContent();
+}
+
+function eliminarRubrica(id){
+  if(!confirm('¿Eliminar esta rúbrica / aprendizajes esperados?')) return;
+  portal.rubricas = portal.rubricas.filter(x=>x.id!==id);
+  saveStore();
+  renderTeacherContent();
+  toast('Rúbrica eliminada','success');
+}
+
 function viewActivities(){
   const draft = activityDraft;
   const editing = !!draft._editingId;
@@ -3426,7 +3557,8 @@ function renderStudentTabs(){
     {id:'grades', label:'📋 Calificaciones'},
     {id:'materials', label:'📁 Materiales'},
     {id:'activities', label:'📌 Tareas'},
-    {id:'exams', label:'📝 Exámenes'}
+    {id:'exams', label:'📝 Exámenes'},
+    {id:'aprendizaje', label:'✍️ Mi aprendizaje'}
   ];
   document.getElementById('tabs').innerHTML = tabs.map(t=>`<button class="tab ${studentTab===t.id?'active':''}" onclick="setStudentTab('${t.id}')">${t.label}</button>`).join('');
   renderStudentContent();
@@ -3521,6 +3653,8 @@ function renderStudentContent(){
         </div>`;
       }).join('')
     }</div></div>`;
+  } else if(studentTab==='aprendizaje'){
+    c.innerHTML = renderStudentAprendizaje();
   }
 }
 
@@ -4061,6 +4195,114 @@ function showExamDone(id){
 }
 
 /* ═══════════════════════════════════════════
+   MI APRENDIZAJE (alumno) — lo que escribió que aprendió,
+   por trimestre. Se registra y llega al Portal de Padres.
+═══════════════════════════════════════════ */
+let reflexionEditMode = {}; // {1:bool,2:bool,3:bool} — true = mostrando el textarea editable
+
+function getMyReflexion(trimestre){
+  return (portal.reflexiones||[]).find(r=>
+    _normCode(r.studentCode)===_normCode(session.code) && Number(r.trimestre)===Number(trimestre)
+  );
+}
+
+function renderStudentAprendizaje(){
+  let html = `<div class="panel" style="background:linear-gradient(135deg,#eef2ff,#e0e7ff);border:1.5px solid #6366f1">
+    <h3 style="color:#3730a3;margin-bottom:.3rem">✍️ Mi aprendizaje</h3>
+    <p class="sub" style="margin:0">Escribe, con tus propias palabras, lo que aprendiste en cada trimestre. Cuando des clic en <strong>Registrar</strong>, tu papá o mamá podrá leerlo en su Portal. Si te equivocas, puedes editarlo después.</p>
+  </div>`;
+  [1,2,3].forEach(t=>{ html += reflexionTrimestreCard(t); });
+  return html;
+}
+
+function reflexionTrimestreCard(trimestre){
+  const r = getMyReflexion(trimestre);
+  const editing = !!reflexionEditMode[trimestre] || !r || !r.registrado;
+  const rubrica = getRubrica(session.grado, session.grupo, trimestre);
+
+  let statusBadge = '';
+  if(r && r.registrado){
+    statusBadge = r.revisado
+      ? `<span class="pill pill-on">✔️ Revisado por tu familia</span>`
+      : `<span class="pill" style="background:#fff3cd;color:#8a6030">🕓 Esperando revisión</span>`;
+  }
+
+  const rubricaHtml = rubrica ? `<div style="background:var(--soft);padding:.7rem .9rem;border-radius:9px;border:1px solid var(--line);margin-bottom:1rem">
+      <strong style="font-size:.76rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">🎯 Aprendizajes esperados de tu maestro</strong>
+      <p style="margin-top:.35rem;white-space:pre-wrap;line-height:1.5;font-size:.9rem">${escHtml(rubrica.texto)}</p>
+    </div>` : '';
+
+  let bodyHtml;
+  if(editing){
+    bodyHtml = `
+      <div class="form-group">
+        <label>¿Qué aprendiste en este trimestre?</label>
+        <textarea id="reflTxt_${trimestre}" rows="6" placeholder="Escribe con tus propias palabras lo que aprendiste...">${escHtml(r?r.texto:'')}</textarea>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="registrarReflexion(${trimestre})">✅ Registrar</button>
+        ${r && r.registrado ? `<button class="btn btn-sec" onclick="cancelarEdicionReflexion(${trimestre})">Cancelar</button>` : ''}
+      </div>
+    `;
+  } else {
+    bodyHtml = `
+      <p style="white-space:pre-wrap;line-height:1.55;background:var(--soft);border:1.5px solid var(--line);border-radius:9px;padding:.9rem 1rem">${escHtml(r.texto)}</p>
+      <div class="btn-row">
+        <button class="btn btn-sec" onclick="editarReflexion(${trimestre})">✏️ Editar</button>
+      </div>
+      <p class="sub" style="margin:.6rem 0 0">Registrado: ${new Date(r.registradoAt).toLocaleString('es-MX')}</p>
+    `;
+  }
+
+  return `
+    <div class="panel">
+      <h3 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+        <span>📘 Trimestre ${trimestre}</span> ${statusBadge}
+      </h3>
+      ${rubricaHtml}
+      ${bodyHtml}
+    </div>
+  `;
+}
+
+function editarReflexion(trimestre){ reflexionEditMode[trimestre] = true; renderStudentContent(); }
+function cancelarEdicionReflexion(trimestre){ reflexionEditMode[trimestre] = false; renderStudentContent(); }
+
+async function registrarReflexion(trimestre){
+  const ta = document.getElementById('reflTxt_'+trimestre);
+  const texto = (ta ? ta.value : '').trim();
+  if(!texto){ toast('Escribe lo que aprendiste antes de registrar','error'); return; }
+  let r = getMyReflexion(trimestre);
+  const now = new Date().toISOString();
+  if(r){
+    r.texto = texto;
+    r.registrado = true;
+    r.registradoAt = now;
+    r.revisado = false;   // si edita después de registrado, vuelve a pedir revisión
+    r.revisadoAt = null;
+    r.grado = session.grado || '';
+    r.grupo = session.grupo || '';
+    r.studentName = session.label;
+  } else {
+    r = {
+      id: uid(), studentCode: session.code, studentName: session.label,
+      grado: session.grado || '', grupo: session.grupo || '', trimestre: Number(trimestre),
+      texto, registrado: true, registradoAt: now, revisado: false, revisadoAt: null
+    };
+    portal.reflexiones.push(r);
+  }
+  reflexionEditMode[trimestre] = false;
+  _persistLocal();
+  try{
+    await pushReflexionFB(r);
+    toast('✓ Registrado — tu papá o mamá ya puede leerlo','success');
+  }catch(err){
+    toast('Guardado localmente, error al sincronizar: '+err.message,'error');
+  }
+  renderStudentContent();
+}
+
+/* ═══════════════════════════════════════════
    PARENT AREA (read-only)
 ═══════════════════════════════════════════ */
 let parentTab = 'grades';
@@ -4078,10 +4320,16 @@ function renderParentTabs(){
   let badge='';
   if(hasMala) badge=' <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#ef4444;box-shadow:0 0 8px #ef4444;animation:livePulse 2s ease-in-out infinite;vertical-align:middle;margin-left:.3rem"></span>';
   else if(hasBuena) badge=' <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#10b981;box-shadow:0 0 8px #10b981;animation:livePulse 2s ease-in-out infinite;vertical-align:middle;margin-left:.3rem"></span>';
+  const misReflexiones = (portal.reflexiones||[]).filter(r=>_normCode(r.studentCode)===_normCode(session.code));
+  const hasPendienteReflexion = misReflexiones.some(r=>r.registrado && !r.revisado);
+  const reflexionBadge = hasPendienteReflexion
+    ? ' <span style="display:inline-block;width:9px;height:9px;border-radius:50%;background:#ef4444;box-shadow:0 0 8px #ef4444;animation:livePulse 2s ease-in-out infinite;vertical-align:middle;margin-left:.3rem" title="Hay información nueva por revisar"></span>'
+    : '';
   const tabs=[
     {id:'grades',label:'📋 Lista de actividades'},
     {id:'tasks',label:'📝 Tareas'},
     {id:'conduct',label:'⚠️ Conducta'+badge},
+    {id:'aprendizaje',label:'🎯 Aprendizajes'+reflexionBadge},
     {id:'summary',label:'🏆 Resumen final'}
   ];
   document.getElementById('tabs').innerHTML=tabs.map(t=>`<button class="tab ${parentTab===t.id?'active':''}" onclick="setParentTab('${t.id}')">${t.label}</button>`).join('');
@@ -4132,7 +4380,77 @@ function renderParentContent(){
   if(parentTab==='grades') c.innerHTML=renderParentGrades(groups);
   else if(parentTab==='tasks') c.innerHTML=renderParentTasks(groups);
   else if(parentTab==='conduct') c.innerHTML=renderParentConduct(groups);
+  else if(parentTab==='aprendizaje') c.innerHTML=renderParentAprendizaje();
   else if(parentTab==='summary') c.innerHTML=renderParentSummary(groups);
+}
+
+/* ── Aprendizajes (rúbrica del maestro + reflexión del alumno, por trimestre) ── */
+function renderParentAprendizaje(){
+  const grado = session.grado, grupo = session.grupo;
+  let html = `<div class="panel" style="background:linear-gradient(135deg,#eef2ff,#e0e7ff);border:1.5px solid #6366f1">
+    <h3 style="color:#3730a3;margin-bottom:.3rem">🎯 Aprendizajes de ${escHtml(session.studentName||'')}</h3>
+    <p class="sub" style="margin:0">Aquí puedes ver los aprendizajes esperados que definió el maestro y lo que tu hijo(a) escribió que aprendió, organizado por trimestre.</p>
+  </div>`;
+  [1,2,3].forEach(t=>{
+    const rubrica = getRubrica(grado, grupo, t);
+    const refl = (portal.reflexiones||[]).find(r=>_normCode(r.studentCode)===_normCode(session.code) && Number(r.trimestre)===t);
+    html += parentAprendizajeTrimestreBlock(t, rubrica, refl);
+  });
+  return html;
+}
+
+function parentAprendizajeTrimestreBlock(trimestre, rubrica, refl){
+  let revisarBadge = '';
+  if(refl && refl.registrado && !refl.revisado){
+    revisarBadge = `<span class="pill" style="background:#fee2e2;color:#991b1b;animation:livePulse 2s ease-in-out infinite">🔴 Revisar</span>`;
+  } else if(refl && refl.registrado && refl.revisado){
+    revisarBadge = `<span class="pill pill-on">✔️ Revisado</span>`;
+  }
+
+  const rubricaHtml = rubrica
+    ? `<div style="background:var(--soft);padding:.9rem 1rem;border-radius:9px;border:1px solid var(--line);margin-bottom:1rem">
+         <strong style="font-size:.76rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">🎯 Aprendizajes esperados / Rúbrica</strong>
+         <p style="margin-top:.4rem;white-space:pre-wrap;line-height:1.5">${escHtml(rubrica.texto)}</p>
+       </div>`
+    : `<p class="sub">El maestro aún no ha publicado los aprendizajes esperados de este trimestre.</p>`;
+
+  let reflexionHtml;
+  if(refl && refl.registrado){
+    reflexionHtml = `<div style="background:#fff;border:1.5px solid var(--line);border-radius:9px;padding:.9rem 1rem">
+        <strong style="font-size:.76rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">✍️ Lo que escribió tu hijo(a)</strong>
+        <p style="margin-top:.4rem;white-space:pre-wrap;line-height:1.5">${escHtml(refl.texto)}</p>
+        <p class="sub" style="margin:.5rem 0 0">Registrado: ${new Date(refl.registradoAt).toLocaleString('es-MX')}${refl.revisado?` · Revisado: ${new Date(refl.revisadoAt).toLocaleString('es-MX')}`:''}</p>
+        ${!refl.revisado ? `<div class="btn-row"><button class="btn btn-green" onclick="marcarReflexionRevisada('${refl.id}')">✔️ Revisado</button></div>` : ''}
+      </div>`;
+  } else {
+    reflexionHtml = `<div class="empty" style="padding:1rem"><p style="margin:0">Tu hijo(a) aún no ha registrado lo que aprendió en este trimestre.</p></div>`;
+  }
+
+  return `
+    <div class="panel">
+      <h3 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+        <span>📘 Trimestre ${trimestre}</span> ${revisarBadge}
+      </h3>
+      ${rubricaHtml}
+      ${reflexionHtml}
+    </div>
+  `;
+}
+
+async function marcarReflexionRevisada(id){
+  const r = (portal.reflexiones||[]).find(x=>x.id===id);
+  if(!r) return;
+  r.revisado = true;
+  r.revisadoAt = new Date().toISOString();
+  _persistLocal();
+  try{
+    await pushReflexionFB(r);
+    toast('✓ Marcado como revisado','success');
+  }catch(err){
+    toast('Guardado localmente, error al sincronizar: '+err.message,'error');
+  }
+  renderParentTabs();
+  renderParentContent();
 }
 
 function _chipCalif(v){
