@@ -792,7 +792,7 @@ function subscribeFirebase(){
       if(session.role==='teacher'){
         // Capture <details open> state before re-render (only matters for entregas tab)
         let openKeys = null;
-        if(teacherTab==='entregas'){
+        if(teacherTab==='activities' && teacherSubTab==='entregas'){
           const tree = document.getElementById('entregasTree');
           if(tree){
             openKeys = new Set();
@@ -804,7 +804,7 @@ function subscribeFirebase(){
         }
         renderTeacherContent();
         // Restore open state
-        if(openKeys && teacherTab==='entregas'){
+        if(openKeys && teacherTab==='activities' && teacherSubTab==='entregas'){
           const newTree = document.getElementById('entregasTree');
           if(newTree){
             newTree.querySelectorAll('details').forEach(d=>{
@@ -1168,7 +1168,6 @@ function renderTeacherTabs(){
     {id:'alumnos', label:'👥 Registro de Alumnos'},
     {id:'materials', label:'📁 Materiales'},
     {id:'activities', label:'📌 Actividades'},
-    {id:'entregas', label:'📥 Entregas'},
     {id:'rubricas', label:'🎯 Rúbricas y Aprendizajes'},
     {id:'io', label:'💾 Importar / Exportar'}
   ];
@@ -1183,8 +1182,7 @@ function renderTeacherContent(){
   if(teacherTab==='calif') c.innerHTML = viewCalif();
   else if(teacherTab==='alumnos') c.innerHTML = viewAlumnos();
   else if(teacherTab==='materials') c.innerHTML = viewMaterials();
-  else if(teacherTab==='activities') c.innerHTML = viewActivities();
-  else if(teacherTab==='entregas') c.innerHTML = viewEntregasHub();
+  else if(teacherTab==='activities') c.innerHTML = viewActividadesHub();
   else if(teacherTab==='rubricas') c.innerHTML = viewRubricas();
   else if(teacherTab==='io') c.innerHTML = viewIO();
 }
@@ -2271,7 +2269,7 @@ function saveExam(){
 }
 function resetExamDraft(){
   examDraft = { title:'', desc:'', grado:'all', grupo:'all', questions:[] };
-  if(teacherTab==='entregas' && teacherSubTab==='exams') renderTeacherContent();
+  if(teacherTab==='activities' && teacherSubTab==='exams') renderTeacherContent();
 }
 function renderExamList(){
   if(!portal.exams.length) return '';
@@ -2966,7 +2964,7 @@ function resetActivityDraft(){
     title:'', desc:'', grado:'all', grupo:'all',
     dueDate:'', attachments:[]
   };
-  if(teacherTab==='activities') renderTeacherContent();
+  if(teacherTab==='activities' && teacherSubTab==='actividades') renderTeacherContent();
 }
 
 function loadActivityForEdit(id){
@@ -3230,18 +3228,22 @@ function _isSubmissionLate(sub, activity){
   return dt.getTime() > due.getTime();
 }
 
-/* ── Entregas: integra Entregas, Exámenes y Visibilidad en subpestañas ── */
-let teacherSubTab = 'entregas'; // 'entregas' | 'exams' | 'visibility'
+/* ── Actividades: integra Actividades, Entregas, Exámenes y Visibilidad en subpestañas ──
+   Orden lógico: 1) crear/gestionar actividades → 2) revisar entregas recibidas →
+   3) exámenes → 4) controlar qué ven alumnos y padres. */
+let teacherSubTab = 'actividades'; // 'actividades' | 'entregas' | 'exams' | 'visibility'
 function setTeacherSubTab(id){ teacherSubTab = id; renderTeacherContent(); }
 
-function viewEntregasHub(){
+function viewActividadesHub(){
+  const subs = portal.submissions || [];
   const subTabs = [
-    {id:'entregas', label:'📥 Entregas', desc:'Archivos que suben los alumnos'},
+    {id:'actividades', label:'📌 Actividades', desc:'Crear y gestionar tareas'},
+    {id:'entregas', label:'📥 Entregas', desc:`Archivos que suben los alumnos${subs.length?` (${subs.length})`:''}`},
     {id:'exams', label:'📝 Exámenes', desc:'Crear y revisar exámenes'},
     {id:'visibility', label:'👁️ Visibilidad', desc:'Qué ven alumnos y padres'}
   ];
   const nav = `<div class="panel" style="padding:.9rem 1.1rem">
-    <h3 style="margin-bottom:.9rem">📥 Entregas, Exámenes y Visibilidad</h3>
+    <h3 style="margin-bottom:.9rem">📌 Actividades, Entregas, Exámenes y Visibilidad</h3>
     <div style="display:flex;gap:.6rem;flex-wrap:wrap">
       ${subTabs.map(t=>`
         <button class="btn ${teacherSubTab===t.id?'btn-primary':'btn-sec'}" onclick="setTeacherSubTab('${t.id}')" style="flex-direction:column;align-items:flex-start;gap:.15rem;padding:.7rem 1.1rem;min-width:150px">
@@ -3252,9 +3254,10 @@ function viewEntregasHub(){
     </div>
   </div>`;
   let body = '';
-  if(teacherSubTab==='exams') body = viewExams();
+  if(teacherSubTab==='entregas') body = viewEntregas();
+  else if(teacherSubTab==='exams') body = viewExams();
   else if(teacherSubTab==='visibility') body = viewVisibility();
-  else body = viewEntregas();
+  else body = viewActivities();
   return nav + body;
 }
 
