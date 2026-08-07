@@ -1007,6 +1007,14 @@ function _gradoFromGroupPortal(g){
   return _parseGradoPortal(g.name);
 }
 
+// Grado/grupo REAL de un alumno: prioriza lo que el Registro de Calificaciones
+// guardó en el propio alumno (s.grado/s.grupo) — necesario para clases
+// combinadas (ej. "Informática 1° ABC" con alumnos reales de 1°A/B/C).
+// Si el alumno no trae esos campos (datos antiguos), cae de vuelta al
+// grado/grupo del grupo/clase, igual que antes.
+function _alumnoGradoPortal(s, g){ return (s && s.grado) ? String(s.grado) : _gradoFromGroupPortal(g); }
+function _alumnoGrupoPortal(s, g){ return (s && s.grupo) ? String(s.grupo).toUpperCase() : parseGrupoLetter(g.name); }
+
 // ── Alumnos derivados EN VIVO del Registro de Calificaciones ──
 // Reemplaza al antiguo registro manual (portal.registroAlumnos): toma
 // grado, grupo, nombre y código directamente de portal.calif (sincronizado
@@ -1017,9 +1025,9 @@ function getAlumnosDesdeCalif(){
   const vistos = new Set();
   const out = [];
   portal.calif.groups.forEach(g=>{
-    const grado = _gradoFromGroupPortal(g);
-    const grupo = parseGrupoLetter(g.name);
     (g.students||[]).forEach(s=>{
+      const grado = _alumnoGradoPortal(s, g);
+      const grupo = _alumnoGrupoPortal(s, g);
       const code = s.qrCode || s.id;
       const key = _normCode(code) + '|' + grado + '|' + grupo;
       if(vistos.has(key)) return;
@@ -1089,11 +1097,12 @@ function loginStudent(){
     return;
   }
   
-  // Grado y grupo se derivan EN VIVO del grupo de calificaciones donde se
-  // encontró al alumno — mismo parser que usa el Registro, así que siempre
-  // concuerdan entre las dos apps (ya no depende de un registro aparte).
-  const grado = _gradoFromGroupPortal(match.group);
-  const grupo = parseGrupoLetter(match.group.name);
+  // Grado y grupo REALES del alumno — si el Registro guardó su grado/grupo
+  // propio (necesario en clases combinadas, ej. "1° ABC") se usa ese; si no,
+  // se cae de vuelta al grado/grupo del grupo de calificaciones. Mismo
+  // criterio que el Registro, así que ambas apps siempre concuerdan.
+  const grado = _alumnoGradoPortal(match.student, match.group);
+  const grupo = _alumnoGrupoPortal(match.student, match.group);
   
   session = { role:'student', code, label:match.student.name,
               grado: grado,
@@ -1119,10 +1128,9 @@ function loginParent(){
     return;
   }
   
-  // Grado y grupo se derivan EN VIVO del grupo de calificaciones (mismo
-  // parser que el Registro), sin depender de un registro aparte.
-  const grado = _gradoFromGroupPortal(match.group);
-  const grupo = parseGrupoLetter(match.group.name);
+  // Grado y grupo REALES del alumno (ver nota en loginStudent).
+  const grado = _alumnoGradoPortal(match.student, match.group);
+  const grupo = _alumnoGrupoPortal(match.student, match.group);
   
   session = { role:'parent', code, label:'Padre de '+match.student.name,
               studentName:match.student.name, studentId:match.student.id,
