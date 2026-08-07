@@ -980,10 +980,10 @@ function closeModal(){ document.getElementById('modalHolder').innerHTML=''; }
 function parseGrupoLetter(name){
   if(!name) return '';
   // Formato numérico: "1°A", "2 A", "3A"...
-  const m = name.match(/[1-3]°?\s*([A-Fa-f])(?=\s|$|[^A-Za-z])/);
+  const m = name.match(/[1-3]°?\s*([A-Ia-i])(?=\s|$|[^A-Za-z])/);
   if(m) return m[1].toUpperCase();
   // Formato con palabra: "Primero A", "Segundo B", "Tercero C"...
-  const m2 = name.match(/(?:PRIMERO|SEGUNDO|TERCERO)\s*([A-Fa-f])(?=\s|$|[^A-Za-z])/i);
+  const m2 = name.match(/(?:PRIMERO|SEGUNDO|TERCERO)\s*([A-Ia-i])(?=\s|$|[^A-Za-z])/i);
   if(m2) return m2[1].toUpperCase();
   return '';
 }
@@ -1013,7 +1013,8 @@ function _gradoFromGroupPortal(g){
 // Si el alumno no trae esos campos (datos antiguos), cae de vuelta al
 // grado/grupo del grupo/clase, igual que antes.
 function _alumnoGradoPortal(s, g){ return (s && s.grado) ? String(s.grado) : _gradoFromGroupPortal(g); }
-function _alumnoGrupoPortal(s, g){ return (s && s.grupo) ? String(s.grupo).toUpperCase() : parseGrupoLetter(g.name); }
+function _alumnoGrupoPortal(s, g){ return (s && s.seccion) ? String(s.seccion).toUpperCase() : (s && s.grupo) ? String(s.grupo).toUpperCase() : parseGrupoLetter(g.name); }
+function _alumnoSexoPortal(s){ return (s && (s.gender==='M'||s.gender==='F')) ? s.gender : null; }
 
 // ── Alumnos derivados EN VIVO del Registro de Calificaciones ──
 // Reemplaza al antiguo registro manual (portal.registroAlumnos): toma
@@ -1495,6 +1496,7 @@ function viewMaterials(){
             <option value="all">Todos</option>
             <option value="A">A</option><option value="B">B</option><option value="C">C</option>
             <option value="D">D</option><option value="E">E</option><option value="F">F</option>
+            <option value="G">G</option><option value="H">H</option><option value="I">I</option>
           </select>
         </div>
       </div>
@@ -1660,7 +1662,7 @@ function viewExams(){
         <div class="form-group"><label>Grupo</label>
           <select id="exGrupo" onchange="examDraft.grupo=this.value">
             <option value="all" ${examDraft.grupo==='all'?'selected':''}>Todos</option>
-            ${['A','B','C','D','E','F'].map(g=>`<option value="${g}" ${examDraft.grupo===g?'selected':''}>${g}</option>`).join('')}
+            ${['A','B','C','D','E','F','G','H','I'].map(g=>`<option value="${g}" ${examDraft.grupo===g?'selected':''}>${g}</option>`).join('')}
           </select></div>
       </div>
       <div id="questionsList">${renderQuestionsDraft()}</div>
@@ -2191,7 +2193,7 @@ function viewRubricas(){
       <div class="form-group">
         <label>Grupo</label>
         <select onchange="setRubricaGrupo(this.value)">
-          ${['A','B','C','D','E','F'].map(g=>`<option value="${g}" ${grupo===g?'selected':''}>Grupo ${g}</option>`).join('')}
+          ${['A','B','C','D','E','F','G','H','I'].map(g=>`<option value="${g}" ${grupo===g?'selected':''}>Grupo ${g}</option>`).join('')}
         </select>
       </div>
     </div>
@@ -2312,7 +2314,7 @@ function viewActivities(){
           <label>Grupo destinatario</label>
           <select id="actGrupo" onchange="activityDraft.grupo=this.value">
             <option value="all" ${draft.grupo==='all'?'selected':''}>🗂️ Todos los grupos</option>
-            ${['A','B','C','D','E','F'].map(g=>`<option value="${g}" ${draft.grupo===g?'selected':''}>Grupo ${g}</option>`).join('')}
+            ${['A','B','C','D','E','F','G','H','I'].map(g=>`<option value="${g}" ${draft.grupo===g?'selected':''}>Grupo ${g}</option>`).join('')}
           </select>
         </div>
       </div>
