@@ -3198,6 +3198,7 @@ function renderStudentTabs(){
     {id:'materials', label:'📁 Materiales'},
     {id:'activities', label:'📌 Tareas'},
     {id:'exams', label:'📝 Exámenes'},
+    {id:'rubrica', label:'📊 Rúbrica'},
     {id:'aprendizaje', label:'✍️ ¿Qué estoy aprendiendo?'}
   ];
   document.getElementById('tabs').innerHTML = tabs.map(t=>`<button class="tab ${studentTab===t.id?'active':''}" onclick="setStudentTab('${t.id}')">${t.label}</button>`).join('');
@@ -3293,6 +3294,8 @@ function renderStudentContent(){
         </div>`;
       }).join('')
     }</div></div>`;
+  } else if(studentTab==='rubrica'){
+    c.innerHTML = renderStudentRubrica();
   } else if(studentTab==='aprendizaje'){
     c.innerHTML = renderStudentAprendizaje();
   }
@@ -3858,23 +3861,12 @@ function renderStudentAprendizaje(){
 function reflexionTrimestreCard(trimestre){
   const r = getMyReflexion(trimestre);
   const editing = !!reflexionEditMode[trimestre] || !r || !r.registrado;
-  const rubrica = getRubrica(session.grado, session.grupo, trimestre);
 
   let statusBadge = '';
   if(r && r.registrado){
     statusBadge = r.revisado
       ? `<span class="pill pill-on">✔️ Revisado por tu familia</span>`
       : `<span class="pill" style="background:#fff3cd;color:#8a6030">🕓 Esperando revisión</span>`;
-  }
-
-  // 🎯 Subcarpeta "Rúbrica": lo que subió el maestro (texto y/o Excel)
-  let rubricaHtml = '';
-  if(rubrica && (rubrica.texto || rubrica.excelData)){
-    rubricaHtml = `<div style="background:var(--soft);padding:.9rem 1rem;border-radius:9px;border:1px solid var(--line);margin-bottom:1rem">
-      <strong style="font-size:.76rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">🎯 Rúbrica de tu maestro</strong>
-      ${rubrica.texto ? `<p style="margin-top:.35rem;white-space:pre-wrap;line-height:1.5;font-size:.9rem">${escHtml(rubrica.texto)}</p>` : ''}
-      ${rubrica.excelData ? `<div style="margin-top:${rubrica.texto?'.8rem':'.35rem'}">${rubrica.excelData.sheets.map(sh=>renderExcelSheetTable(sh)).join('')}</div>` : ''}
-    </div>`;
   }
 
   let bodyHtml;
@@ -3904,8 +3896,35 @@ function reflexionTrimestreCard(trimestre){
       <h3 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
         <span>📘 Trimestre ${trimestre}</span> ${statusBadge}
       </h3>
-      ${rubricaHtml}
       ${bodyHtml}
+    </div>
+  `;
+}
+
+// ── Pestaña "📊 Rúbrica" del alumno: SOLO lo que subió el maestro
+// (texto y/o Excel), organizado en los 3 trimestres. Separada de
+// "¿Qué estoy aprendiendo?" para no mezclar la rúbrica del maestro con
+// la reflexión propia del alumno.
+function renderStudentRubrica(){
+  let html = `<div class="panel" style="background:linear-gradient(135deg,#eef2ff,#e0e7ff);border:1.5px solid #6366f1">
+    <h3 style="color:#3730a3;margin-bottom:.3rem">📊 Rúbrica de evaluación</h3>
+    <p class="sub" style="margin:0">Esto es lo que tu maestro(a) publicó: los aprendizajes esperados y/o la rúbrica en Excel de cada trimestre.</p>
+  </div>`;
+  [1,2,3].forEach(t=>{ html += rubricaTrimestreCardAlumno(t); });
+  return html;
+}
+
+function rubricaTrimestreCardAlumno(trimestre){
+  const rubrica = getRubrica(session.grado, session.grupo, trimestre);
+  const trimNombres = {1:'Primer', 2:'Segundo', 3:'Tercer'};
+  const tieneContenido = rubrica && (rubrica.texto || rubrica.excelData);
+  return `
+    <div class="panel">
+      <h3>📘 ${trimNombres[trimestre]} Trimestre</h3>
+      ${tieneContenido ? `
+        ${rubrica.texto ? `<p style="white-space:pre-wrap;line-height:1.55;background:var(--soft);border:1.5px solid var(--line);border-radius:9px;padding:.9rem 1rem;margin-bottom:${rubrica.excelData?'1rem':'0'}">${escHtml(rubrica.texto)}</p>` : ''}
+        ${rubrica.excelData ? rubrica.excelData.sheets.map(sh=>renderExcelSheetTable(sh)).join('') : ''}
+      ` : `<div class="empty" style="padding:1rem"><p style="margin:0">Tu maestro(a) aún no ha publicado la rúbrica de este trimestre.</p></div>`}
     </div>
   `;
 }
