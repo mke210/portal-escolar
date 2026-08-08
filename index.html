@@ -650,6 +650,28 @@ function setConnState(state, label){
   });
 }
 
+// Load SheetJS (xlsx) library with CDN fallbacks — mismo patrón que Firebase.
+// Se usa para leer archivos .xlsx de rúbricas subidos por el maestro.
+function loadXLSXLib(){
+  return new Promise((resolve, reject) => {
+    if(typeof XLSX !== 'undefined'){ resolve(); return; }
+    const cdns = [
+      'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+      'https://unpkg.com/xlsx@0.18.5/dist/xlsx.full.min.js'
+    ];
+    let idx = 0;
+    function tryNext(){
+      if(idx >= cdns.length){ reject(new Error('No se pudo cargar la librería de Excel')); return; }
+      const s = document.createElement('script');
+      s.src = cdns[idx++];
+      s.onload = () => { if(typeof XLSX !== 'undefined') resolve(); else tryNext(); };
+      s.onerror = () => tryNext();
+      document.head.appendChild(s);
+    }
+    tryNext();
+  });
+}
+
 // Load Firebase SDK with multiple CDN fallbacks
 function loadFirebaseSDK(){
   return new Promise((resolve, reject) => {
@@ -2163,9 +2185,11 @@ function _dueStatus(dueIso){
 ═══════════════════════════════════════════ */
 let rubricaGradoSel = '1';
 let rubricaGrupoSel = 'A';
+let rubricaTrimestreSel = 1;
 
 function setRubricaGrado(v){ rubricaGradoSel = v; renderTeacherContent(); }
 function setRubricaGrupo(v){ rubricaGrupoSel = v; renderTeacherContent(); }
+function setRubricaTrimestre(t){ rubricaTrimestreSel = t; renderTeacherContent(); }
 
 function getRubrica(grado, grupo, trimestre){
   return (portal.rubricas||[]).find(x=>
@@ -2175,12 +2199,47 @@ function getRubrica(grado, grupo, trimestre){
   );
 }
 
+// Convierte una hoja de Excel (array de filas) en una tabla HTML legible.
+// Heurística: una fila con un solo valor no vacío se muestra como título
+// destacado (sirve para el título, subtítulo y fila de "TOTAL"); la primera
+// fila con varios valores se trata como encabezado; el resto son datos.
+// Los valores decimales entre 0 y 1 se muestran como porcentaje (0.3 → 30%).
+function renderExcelSheetTable(sheet){
+  const rows = sheet.rows || [];
+  let headerSeen = false;
+  let body = '';
+  rows.forEach(row=>{
+    const nonEmpty = row.filter(c=>c!==null && c!==undefined && String(c).trim()!=='');
+    if(nonEmpty.length===0) return;
+    if(nonEmpty.length===1){
+      body += `<tr><td colspan="${Math.max(row.length,2)}" style="background:var(--soft);font-weight:700;padding:.55rem .8rem;border-bottom:1px solid var(--line)">${escHtml(String(nonEmpty[0]))}</td></tr>`;
+    } else {
+      const isHeader = !headerSeen;
+      if(isHeader) headerSeen = true;
+      body += `<tr>${row.map(c=>{
+        let val = (c===null||c===undefined) ? '' : c;
+        if(typeof val === 'number' && val>0 && val<1) val = Math.round(val*100)+'%';
+        val = escHtml(String(val));
+        return isHeader
+          ? `<th style="background:var(--ink);color:white;padding:.5rem .6rem;font-size:.76rem;text-align:left;white-space:nowrap">${val}</th>`
+          : `<td style="padding:.5rem .6rem;border-bottom:1px solid var(--line);font-size:.8rem;vertical-align:top">${val}</td>`;
+      }).join('')}</tr>`;
+    }
+  });
+  return `<div style="margin-bottom:1.2rem">
+    <div style="font-weight:700;font-size:.85rem;color:var(--accent);margin-bottom:.4rem">📄 ${escHtml(sheet.name)}</div>
+    <div style="overflow-x:auto;border:1.5px solid var(--line);border-radius:8px"><table style="width:100%;border-collapse:collapse">${body}</table></div>
+  </div>`;
+}
+
 function viewRubricas(){
   const grado = rubricaGradoSel;
   const grupo = rubricaGrupoSel;
+  const t = rubricaTrimestreSel;
+  const trimNombres = {1:'Primer Trimestre', 2:'Segundo Trimestre', 3:'Tercer Trimestre'};
   let html = `<div class="panel">
     <h3>🎯 Rúbricas de evaluación y aprendizajes esperados</h3>
-    <p class="sub">Define, por grado, grupo y trimestre (son tres), los aprendizajes esperados y/o la rúbrica de evaluación. Esta información aparecerá automáticamente en el Portal de Padres de Familia.</p>
+    <p class="sub">Sube la rúbrica en Excel (o escribe los aprendizajes esperados) por grado, grupo y trimestre. Esta información aparece automáticamente en el Portal de Padres de Familia y en la tarjeta del Alumno.</p>
     <div class="form-row">
       <div class="form-group">
         <label>Grado</label>
@@ -2198,28 +2257,99 @@ function viewRubricas(){
       </div>
     </div>
     <p class="sub" style="margin:0"><span class="pill pill-grado">${gradoLabel(grado)}</span> <span class="pill pill-grupo">Grupo ${grupo}</span></p>
+  </div>
+  <div class="panel" style="padding:.9rem 1.1rem">
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap">
+      ${[1,2,3].map(tt=>`<button class="btn ${t===tt?'btn-primary':'btn-sec'}" onclick="setRubricaTrimestre(${tt})">${trimNombres[tt]}</button>`).join('')}
+    </div>
   </div>`;
-  [1,2,3].forEach(t=>{ html += rubricaTrimestreBlock(grado, grupo, t); });
+  html += rubricaTrimestreBlock(grado, grupo, t);
   return html;
 }
 
 function rubricaTrimestreBlock(grado, grupo, trimestre){
   const r = getRubrica(grado, grupo, trimestre);
   const texto = r ? r.texto : '';
+  const excel = r && r.excelData;
+  const trimNombres = {1:'Primer', 2:'Segundo', 3:'Tercer'};
   return `
     <div class="panel">
-      <h3>📘 Trimestre ${trimestre}</h3>
+      <h3 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
+        <span>📘 ${trimNombres[trimestre]} Trimestre — ${gradoLabel(grado)} Grupo ${grupo}</span>
+        ${r ? `<button class="btn btn-danger" style="font-size:.75rem;padding:.3rem .7rem" onclick="eliminarRubrica('${r.id}')">🗑️ Eliminar todo</button>` : ''}
+      </h3>
+
+      <div style="background:var(--soft);border:1.5px solid var(--line);border-radius:10px;padding:1rem;margin-bottom:1rem">
+        <strong style="font-size:.85rem">📊 Rúbrica en Excel</strong>
+        <p class="sub" style="margin:.3rem 0 .7rem">Sube el archivo .xlsx con la rúbrica de evaluación. Los alumnos y padres la verán organizada en tablas, tal como la subiste.</p>
+        <div class="btn-row" style="align-items:center;flex-wrap:wrap">
+          <input type="file" id="rubExcelInput_${trimestre}" accept=".xlsx,.xls" style="max-width:220px">
+          <button class="btn btn-primary" onclick="subirRubricaExcel(${trimestre})">📤 Subir Excel</button>
+          ${excel ? `<button class="btn btn-danger" onclick="eliminarRubricaExcel(${trimestre})">🗑️ Quitar archivo</button>` : ''}
+        </div>
+        ${excel
+          ? `<p class="sub" style="margin:.7rem 0 0">📄 <strong>${escHtml(excel.filename)}</strong> — actualizado ${new Date(r.updatedAt).toLocaleString('es-MX')}</p>
+             <div style="margin-top:.9rem">${excel.sheets.map(sh=>renderExcelSheetTable(sh)).join('')}</div>`
+          : `<p class="sub" style="margin:.7rem 0 0">Aún no has subido ningún archivo para este trimestre.</p>`}
+      </div>
+
       <div class="form-group">
-        <label>Aprendizajes esperados / Rúbrica de evaluación</label>
-        <textarea id="rubTxt_${trimestre}" rows="6" placeholder="Escribe aquí los aprendizajes esperados y/o los criterios de evaluación de este trimestre para ${gradoLabel(grado)} Grupo ${grupo}...">${escHtml(texto)}</textarea>
+        <label>Aprendizajes esperados (texto libre, opcional)</label>
+        <textarea id="rubTxt_${trimestre}" rows="4" placeholder="Escribe aquí los aprendizajes esperados de este trimestre...">${escHtml(texto)}</textarea>
       </div>
       <div class="btn-row">
-        <button class="btn btn-primary" onclick="guardarRubrica(${trimestre})">💾 Guardar</button>
-        ${r ? `<button class="btn btn-danger" onclick="eliminarRubrica('${r.id}')">🗑️ Eliminar</button>` : ''}
+        <button class="btn btn-sec" onclick="guardarRubrica(${trimestre})">💾 Guardar texto</button>
       </div>
-      ${r ? `<p class="sub" style="margin:.7rem 0 0">Última actualización: ${new Date(r.updatedAt).toLocaleString('es-MX')}</p>` : `<p class="sub" style="margin:.7rem 0 0">Aún no has guardado información para este trimestre.</p>`}
+      ${r ? `<p class="sub" style="margin:.7rem 0 0">Última actualización: ${new Date(r.updatedAt).toLocaleString('es-MX')}</p>` : ''}
     </div>
   `;
+}
+
+async function subirRubricaExcel(trimestre){
+  const inp = document.getElementById('rubExcelInput_'+trimestre);
+  const file = inp && inp.files && inp.files[0];
+  if(!file){ toast('Selecciona un archivo Excel primero','error'); return; }
+  toast('Leyendo el archivo…','success');
+  try{
+    await loadXLSXLib();
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array'});
+    const sheets = wb.SheetNames.map(name=>({
+      name,
+      rows: XLSX.utils.sheet_to_json(wb.Sheets[name], {header:1, defval:''})
+    }));
+    guardarRubricaExcel(trimestre, file.name, sheets);
+  }catch(err){
+    toast('No se pudo leer el Excel: '+err.message,'error');
+  }
+}
+
+function guardarRubricaExcel(trimestre, filename, sheets){
+  const grado = rubricaGradoSel;
+  const grupo = rubricaGrupoSel;
+  let r = getRubrica(grado, grupo, trimestre);
+  const now = new Date().toISOString();
+  if(r){
+    r.excelData = { filename, sheets };
+    r.updatedAt = now;
+  } else {
+    r = { id: uid(), grado, grupo, trimestre: Number(trimestre), texto:'', excelData:{ filename, sheets }, createdAt: now, updatedAt: now };
+    portal.rubricas.push(r);
+  }
+  saveStore();
+  toast('✓ Rúbrica en Excel cargada — alumnos y padres ya pueden verla','success');
+  renderTeacherContent();
+}
+
+function eliminarRubricaExcel(trimestre){
+  const r = getRubrica(rubricaGradoSel, rubricaGrupoSel, trimestre);
+  if(!r || !r.excelData) return;
+  if(!confirm('¿Quitar el archivo Excel de esta rúbrica? El texto libre (si tiene) no se borra.')) return;
+  delete r.excelData;
+  r.updatedAt = new Date().toISOString();
+  saveStore();
+  renderTeacherContent();
+  toast('Archivo Excel eliminado','success');
 }
 
 function guardarRubrica(trimestre){
@@ -2227,23 +2357,23 @@ function guardarRubrica(trimestre){
   const grupo = rubricaGrupoSel;
   const ta = document.getElementById('rubTxt_'+trimestre);
   const texto = (ta ? ta.value : '').trim();
-  if(!texto){ toast('Escribe el contenido antes de guardar','error'); return; }
   let r = getRubrica(grado, grupo, trimestre);
   const now = new Date().toISOString();
   if(r){
     r.texto = texto;
     r.updatedAt = now;
   } else {
+    if(!texto){ toast('Escribe algo o sube un Excel primero','error'); return; }
     r = { id: uid(), grado, grupo, trimestre: Number(trimestre), texto, createdAt: now, updatedAt: now };
     portal.rubricas.push(r);
   }
   saveStore();
-  toast('✓ Rúbrica guardada — los padres ya pueden verla','success');
+  toast('✓ Texto guardado','success');
   renderTeacherContent();
 }
 
 function eliminarRubrica(id){
-  if(!confirm('¿Eliminar esta rúbrica / aprendizajes esperados?')) return;
+  if(!confirm('¿Eliminar por completo esta rúbrica (texto y Excel) de este trimestre?')) return;
   portal.rubricas = portal.rubricas.filter(x=>x.id!==id);
   saveStore();
   renderTeacherContent();
@@ -3068,7 +3198,7 @@ function renderStudentTabs(){
     {id:'materials', label:'📁 Materiales'},
     {id:'activities', label:'📌 Tareas'},
     {id:'exams', label:'📝 Exámenes'},
-    {id:'aprendizaje', label:'✍️ Mi aprendizaje'}
+    {id:'aprendizaje', label:'✍️ ¿Qué estoy aprendiendo?'}
   ];
   document.getElementById('tabs').innerHTML = tabs.map(t=>`<button class="tab ${studentTab===t.id?'active':''}" onclick="setStudentTab('${t.id}')">${t.label}</button>`).join('');
   renderStudentContent();
@@ -3718,7 +3848,7 @@ function getMyReflexion(trimestre){
 
 function renderStudentAprendizaje(){
   let html = `<div class="panel" style="background:linear-gradient(135deg,#eef2ff,#e0e7ff);border:1.5px solid #6366f1">
-    <h3 style="color:#3730a3;margin-bottom:.3rem">✍️ Mi aprendizaje</h3>
+    <h3 style="color:#3730a3;margin-bottom:.3rem">✍️ ¿Qué estoy aprendiendo?</h3>
     <p class="sub" style="margin:0">Escribe, con tus propias palabras, lo que aprendiste en cada trimestre. Cuando des clic en <strong>Registrar</strong>, tu papá o mamá podrá leerlo en su Portal. Si te equivocas, puedes editarlo después.</p>
   </div>`;
   [1,2,3].forEach(t=>{ html += reflexionTrimestreCard(t); });
@@ -3737,10 +3867,15 @@ function reflexionTrimestreCard(trimestre){
       : `<span class="pill" style="background:#fff3cd;color:#8a6030">🕓 Esperando revisión</span>`;
   }
 
-  const rubricaHtml = rubrica ? `<div style="background:var(--soft);padding:.7rem .9rem;border-radius:9px;border:1px solid var(--line);margin-bottom:1rem">
-      <strong style="font-size:.76rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">🎯 Aprendizajes esperados de tu maestro</strong>
-      <p style="margin-top:.35rem;white-space:pre-wrap;line-height:1.5;font-size:.9rem">${escHtml(rubrica.texto)}</p>
-    </div>` : '';
+  // 🎯 Subcarpeta "Rúbrica": lo que subió el maestro (texto y/o Excel)
+  let rubricaHtml = '';
+  if(rubrica && (rubrica.texto || rubrica.excelData)){
+    rubricaHtml = `<div style="background:var(--soft);padding:.9rem 1rem;border-radius:9px;border:1px solid var(--line);margin-bottom:1rem">
+      <strong style="font-size:.76rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">🎯 Rúbrica de tu maestro</strong>
+      ${rubrica.texto ? `<p style="margin-top:.35rem;white-space:pre-wrap;line-height:1.5;font-size:.9rem">${escHtml(rubrica.texto)}</p>` : ''}
+      ${rubrica.excelData ? `<div style="margin-top:${rubrica.texto?'.8rem':'.35rem'}">${rubrica.excelData.sheets.map(sh=>renderExcelSheetTable(sh)).join('')}</div>` : ''}
+    </div>`;
+  }
 
   let bodyHtml;
   if(editing){
@@ -3917,12 +4052,13 @@ function parentAprendizajeTrimestreBlock(trimestre, rubrica, refl){
     revisarBadge = `<span class="pill pill-on">✔️ Revisado</span>`;
   }
 
-  const rubricaHtml = rubrica
+  const rubricaHtml = (rubrica && (rubrica.texto || rubrica.excelData))
     ? `<div style="background:var(--soft);padding:.9rem 1rem;border-radius:9px;border:1px solid var(--line);margin-bottom:1rem">
-         <strong style="font-size:.76rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">🎯 Aprendizajes esperados / Rúbrica</strong>
-         <p style="margin-top:.4rem;white-space:pre-wrap;line-height:1.5">${escHtml(rubrica.texto)}</p>
+         <strong style="font-size:.76rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">🎯 Rúbrica del maestro</strong>
+         ${rubrica.texto ? `<p style="margin-top:.4rem;white-space:pre-wrap;line-height:1.5">${escHtml(rubrica.texto)}</p>` : ''}
+         ${rubrica.excelData ? `<div style="margin-top:${rubrica.texto?'.8rem':'.4rem'}">${rubrica.excelData.sheets.map(sh=>renderExcelSheetTable(sh)).join('')}</div>` : ''}
        </div>`
-    : `<p class="sub">El maestro aún no ha publicado los aprendizajes esperados de este trimestre.</p>`;
+    : `<p class="sub">El maestro aún no ha publicado la rúbrica de este trimestre.</p>`;
 
   let reflexionHtml;
   if(refl && refl.registrado){
