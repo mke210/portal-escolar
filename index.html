@@ -506,6 +506,7 @@ let portal = {
   activities: [],     // [{id,title,desc,grado,grupo,dueDate,attachments:[{type,name,content,filename}],createdAt,visible}]
   submissions: [],    // [{id,activityId,studentCode,studentName,studentGrado,studentGrupo,files:[{name,content,size,mime}],note,submittedAt,updatedAt}]
   rubricas: [],        // [{id,grado,grupo,trimestre,texto,createdAt,updatedAt}] — rúbricas / aprendizajes esperados por grado, grupo y trimestre
+  aprendizajes: [],    // [{id,grado,trimestre,tema,contenido,actividades,aprendera,orden}] — planificación de aprendizajes subida en Excel (por grado y trimestre)
   reflexiones: []       // [{id,studentCode,studentName,grado,grupo,trimestre,texto,registrado,registradoAt,revisado,revisadoAt}] — lo que el alumno escribió que aprendió
 };
 let session = null;   // {role,label} | null
@@ -607,6 +608,7 @@ function loadStore(){
       if(!portal.activities) portal.activities = [];
       if(!portal.submissions) portal.submissions = [];
       if(!portal.rubricas) portal.rubricas = [];
+      if(!portal.aprendizajes) portal.aprendizajes = [];
       if(!portal.reflexiones) portal.reflexiones = [];
       // Drop offloaded placeholders — Firebase will refill them
       portal.materials = portal.materials.filter(m=>m.content!=='__OFFLOADED__');
@@ -750,6 +752,7 @@ function subscribeFirebase(){
       portal.registroAlumnos = v.registroAlumnos || [];
       portal.activities = v.activities || [];
       portal.rubricas = v.rubricas || [];
+      portal.aprendizajes = v.aprendizajes || [];
       // Only overwrite calif from portal/data if calificaciones/data hasn't pushed yet
       if(v.calif && !portal._califFromRegistro) portal.calif = v.calif;
       _persistLocal();
@@ -890,6 +893,7 @@ function syncToFirebase(immediate){
       registroAlumnos: portal.registroAlumnos || [],
       activities: portal.activities || [],
       rubricas: portal.rubricas || [],
+      aprendizajes: portal.aprendizajes || [],
       updatedAt: Date.now()
     }).catch(err=>{
       console.error('Sync error',err);
@@ -959,6 +963,7 @@ function forcePublish(){
     registroAlumnos: portal.registroAlumnos || [],
     activities: portal.activities || [],
     rubricas: portal.rubricas || [],
+    aprendizajes: portal.aprendizajes || [],
     updatedAt: Date.now()
   }).then(()=>{
     toast('Publicado a Firebase ✓','success');
@@ -2258,6 +2263,21 @@ function viewRubricas(){
     </div>
     <p class="sub" style="margin:0"><span class="pill pill-grado">${gradoLabel(grado)}</span> <span class="pill pill-grupo">Grupo ${grupo}</span></p>
   </div>
+  <div class="panel" style="background:linear-gradient(135deg,#eef2ff,#e0e7ff);border:1.5px solid #6366f1">
+    <h3 style="color:#3730a3;margin-bottom:.3rem">📚 Planificación de Aprendizajes (Excel)</h3>
+    <p class="sub" style="margin:0 0 .8rem">Sube un archivo con columnas <strong>Trimestre | Tema/Unidad | Contenido Temático | Actividades Sugeridas | Lo que Aprenderá el Estudiante</strong>. Si el archivo trae una hoja por grado (ej. "1° Secundaria", "2° Secundaria", "3° Secundaria"), se detecta solo y se organiza por trimestre — no depende del Grado/Grupo elegidos arriba.</p>
+    <div class="btn-row" style="align-items:center;flex-wrap:wrap">
+      <input type="file" id="aprendizajesExcelInput" accept=".xlsx,.xls" style="max-width:240px">
+      <button class="btn btn-primary" onclick="subirAprendizajesExcel()">📤 Subir Planificación</button>
+      ${(portal.aprendizajes||[]).some(a=>a.grado===grado) ? `<button class="btn btn-danger" onclick="eliminarAprendizajesGrado('${grado}')">🗑️ Quitar de ${gradoLabel(grado)}</button>` : ''}
+    </div>
+    ${(() => {
+      const gradosConDatos = [...new Set((portal.aprendizajes||[]).map(a=>a.grado))].sort();
+      return gradosConDatos.length
+        ? `<p class="sub" style="margin:.7rem 0 0">Grados con planificación cargada: ${gradosConDatos.map(g=>`<span class="pill pill-grado">${gradoLabel(g)}</span>`).join(' ')}</p>`
+        : `<p class="sub" style="margin:.7rem 0 0">Aún no has subido ninguna planificación.</p>`;
+    })()}
+  </div>
   <div class="panel" style="padding:.9rem 1.1rem">
     <div style="display:flex;gap:.6rem;flex-wrap:wrap">
       ${[1,2,3].map(tt=>`<button class="btn ${t===tt?'btn-primary':'btn-sec'}" onclick="setRubricaTrimestre(${tt})">${trimNombres[tt]}</button>`).join('')}
@@ -2292,6 +2312,16 @@ function rubricaTrimestreBlock(grado, grupo, trimestre){
              <div style="margin-top:.9rem">${excel.sheets.map(sh=>renderExcelSheetTable(sh)).join('')}</div>`
           : `<p class="sub" style="margin:.7rem 0 0">Aún no has subido ningún archivo para este trimestre.</p>`}
       </div>
+
+      ${(() => {
+        const items = getAprendizajesDe(grado, trimestre);
+        if(!items.length) return '';
+        return `<div style="border:1.5px solid var(--line);border-radius:10px;padding:1rem;margin-bottom:1rem">
+          <strong style="font-size:.85rem">📚 Planificación de Aprendizajes (Excel) — ${gradoLabel(grado)}</strong>
+          <p class="sub" style="margin:.3rem 0 .7rem">${items.length} tema${items.length!==1?'s':''} cargado${items.length!==1?'s':''} para este trimestre. Aplica a todos los grupos de ${gradoLabel(grado)}.</p>
+          ${items.map(renderAprendizajeItem).join('')}
+        </div>`;
+      })()}
 
       <div class="form-group">
         <label>Aprendizajes esperados (texto libre, opcional)</label>
@@ -2339,6 +2369,112 @@ function guardarRubricaExcel(trimestre, filename, sheets){
   saveStore();
   toast('✓ Rúbrica en Excel cargada — alumnos y padres ya pueden verla','success');
   renderTeacherContent();
+}
+
+/* ═══════════════════════════════════════════════════════════════════════
+   PLANIFICACIÓN DE APRENDIZAJES (Excel) — Trimestre, Tema/Unidad,
+   Contenido Temático, Actividades Sugeridas, Lo que Aprenderá el Estudiante.
+   Un solo archivo puede traer una hoja por grado (ej. "1° Secundaria",
+   "2° Secundaria", "3° Secundaria"); se detecta el grado por el nombre de
+   cada hoja y se organiza automáticamente por trimestre.
+═══════════════════════════════════════════════════════════════════════ */
+const TRIM_PALABRA_A_NUM = { 'PRIMERO':1, 'PRIMER':1, 'SEGUNDO':2, 'TERCERO':3, 'TERCER':3 };
+function _parseTrimestreTexto(s){
+  if(!s) return null;
+  const n = String(s).toUpperCase();
+  if(n.includes('PRIMER')) return 1;
+  if(n.includes('SEGUNDO')) return 2;
+  if(n.includes('TERCER')) return 3;
+  const num = n.match(/[123]/);
+  return num ? Number(num[0]) : null;
+}
+
+// Convierte las filas de una hoja (formato: Trimestre | Tema/Unidad |
+// Contenido Temático | Actividades Sugeridas | Lo que Aprenderá) en items
+// estructurados. Ignora filas de título y las filas "separador de
+// trimestre" que solo traen la primera columna llena.
+function _parseAprendizajesSheet(rows){
+  const items = [];
+  let ordenActual = 0;
+  rows.forEach(row=>{
+    const [colTrim, tema, contenido, actividades, aprendera] = row;
+    const restoLleno = [tema, contenido, actividades, aprendera].some(c => c !== null && c !== undefined && String(c).trim() !== '');
+    if(!restoLleno) return; // fila de título o separador de trimestre vacío
+    const trimestre = _parseTrimestreTexto(colTrim);
+    if(!trimestre) return; // fila de encabezado ("Trimestre | Tema/Unidad | ...") u otra cosa
+    items.push({
+      trimestre,
+      tema: String(tema||'').trim(),
+      contenido: String(contenido||'').trim(),
+      actividades: String(actividades||'').trim(),
+      aprendera: String(aprendera||'').trim(),
+      orden: ordenActual++
+    });
+  });
+  return items;
+}
+
+async function subirAprendizajesExcel(){
+  const inp = document.getElementById('aprendizajesExcelInput');
+  const file = inp && inp.files && inp.files[0];
+  if(!file){ toast('Selecciona un archivo Excel primero','error'); return; }
+  toast('Leyendo el archivo…','success');
+  try{
+    await loadXLSXLib();
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array'});
+    let gradosActualizados = [];
+    let totalItems = 0;
+    wb.SheetNames.forEach(sheetName=>{
+      const grado = _parseGradoPortal(sheetName);
+      if(grado==='?') return; // hoja cuyo nombre no indica un grado reconocible — se ignora
+      const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {header:1, defval:''});
+      const items = _parseAprendizajesSheet(rows);
+      if(!items.length) return;
+      // Reemplaza lo que hubiera antes para ese grado (re-subir actualiza limpio)
+      portal.aprendizajes = (portal.aprendizajes||[]).filter(a => a.grado !== grado);
+      items.forEach(it=>{
+        portal.aprendizajes.push({ id: uid(), grado, ...it });
+      });
+      gradosActualizados.push(grado);
+      totalItems += items.length;
+    });
+    if(!gradosActualizados.length){
+      toast('No se reconoció ningún grado en las hojas del archivo. Usa hojas nombradas "1° Secundaria", "2° Secundaria", etc.','error');
+      return;
+    }
+    saveStore();
+    renderTeacherContent();
+    toast(`✓ Planificación cargada: ${totalItems} temas en ${gradosActualizados.length} grado(s) — alumnos y padres ya pueden verla`,'success');
+  }catch(err){
+    toast('No se pudo leer el Excel: '+err.message,'error');
+  }
+}
+
+function eliminarAprendizajesGrado(grado){
+  if(!confirm(`¿Quitar toda la planificación de aprendizajes de ${gradoLabel(grado)}?`)) return;
+  portal.aprendizajes = (portal.aprendizajes||[]).filter(a => a.grado !== grado);
+  saveStore();
+  renderTeacherContent();
+  toast('Planificación eliminada','success');
+}
+
+// Items de aprendizajes de un grado+trimestre, en el orden en que venían en el Excel
+function getAprendizajesDe(grado, trimestre){
+  return (portal.aprendizajes||[])
+    .filter(a => a.grado===grado && Number(a.trimestre)===Number(trimestre))
+    .sort((a,b)=>a.orden-b.orden);
+}
+
+// Tarjeta HTML de un tema/unidad de aprendizaje (reutilizable en maestro,
+// alumno y padres).
+function renderAprendizajeItem(it){
+  return `<div style="background:white;border:1.5px solid var(--line);border-radius:9px;padding:.9rem 1rem;margin-bottom:.7rem">
+    <div style="font-weight:700;font-size:.92rem;color:var(--accent);margin-bottom:.3rem">${escHtml(it.tema||'(Sin título)')}</div>
+    ${it.contenido?`<p style="margin:.3rem 0;font-size:.85rem;line-height:1.5"><strong style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">Contenido temático</strong><br>${escHtml(it.contenido)}</p>`:''}
+    ${it.actividades?`<p style="margin:.3rem 0;font-size:.85rem;line-height:1.5;white-space:pre-wrap"><strong style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">Actividades sugeridas</strong><br>${escHtml(it.actividades)}</p>`:''}
+    ${it.aprendera?`<p style="margin:.3rem 0 0;font-size:.85rem;line-height:1.5;background:var(--soft);border-radius:7px;padding:.6rem .7rem"><strong style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">🌱 Lo que aprenderá el estudiante</strong><br>${escHtml(it.aprendera)}</p>`:''}
+  </div>`;
 }
 
 function eliminarRubricaExcel(trimestre){
@@ -3918,13 +4054,20 @@ function rubricaTrimestreCardAlumno(trimestre){
   const rubrica = getRubrica(session.grado, session.grupo, trimestre);
   const trimNombres = {1:'Primer', 2:'Segundo', 3:'Tercer'};
   const tieneContenido = rubrica && (rubrica.texto || rubrica.excelData);
+  const aprendizajeItems = session.grado ? getAprendizajesDe(session.grado, trimestre) : [];
   return `
     <div class="panel">
       <h3>📘 ${trimNombres[trimestre]} Trimestre</h3>
       ${tieneContenido ? `
         ${rubrica.texto ? `<p style="white-space:pre-wrap;line-height:1.55;background:var(--soft);border:1.5px solid var(--line);border-radius:9px;padding:.9rem 1rem;margin-bottom:${rubrica.excelData?'1rem':'0'}">${escHtml(rubrica.texto)}</p>` : ''}
         ${rubrica.excelData ? rubrica.excelData.sheets.map(sh=>renderExcelSheetTable(sh)).join('') : ''}
-      ` : `<div class="empty" style="padding:1rem"><p style="margin:0">Tu maestro(a) aún no ha publicado la rúbrica de este trimestre.</p></div>`}
+      ` : (aprendizajeItems.length ? '' : `<div class="empty" style="padding:1rem"><p style="margin:0">Tu maestro(a) aún no ha publicado la rúbrica de este trimestre.</p></div>`)}
+      ${aprendizajeItems.length ? `
+        <div style="margin-top:${tieneContenido?'1rem':'0'}">
+          <strong style="font-size:.76rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">📚 Planificación de Aprendizajes</strong>
+          <div style="margin-top:.5rem">${aprendizajeItems.map(renderAprendizajeItem).join('')}</div>
+        </div>
+      ` : ''}
     </div>
   `;
 }
@@ -4058,12 +4201,12 @@ function renderParentAprendizaje(){
   [1,2,3].forEach(t=>{
     const rubrica = getRubrica(grado, grupo, t);
     const refl = (portal.reflexiones||[]).find(r=>_normCode(r.studentCode)===_normCode(session.code) && Number(r.trimestre)===t);
-    html += parentAprendizajeTrimestreBlock(t, rubrica, refl);
+    html += parentAprendizajeTrimestreBlock(t, rubrica, refl, grado);
   });
   return html;
 }
 
-function parentAprendizajeTrimestreBlock(trimestre, rubrica, refl){
+function parentAprendizajeTrimestreBlock(trimestre, rubrica, refl, grado){
   let revisarBadge = '';
   if(refl && refl.registrado && !refl.revisado){
     revisarBadge = `<span class="pill" style="background:#fee2e2;color:#991b1b;animation:livePulse 2s ease-in-out infinite">🔴 Revisar</span>`;
@@ -4078,6 +4221,14 @@ function parentAprendizajeTrimestreBlock(trimestre, rubrica, refl){
          ${rubrica.excelData ? `<div style="margin-top:${rubrica.texto?'.8rem':'.4rem'}">${rubrica.excelData.sheets.map(sh=>renderExcelSheetTable(sh)).join('')}</div>` : ''}
        </div>`
     : `<p class="sub">El maestro aún no ha publicado la rúbrica de este trimestre.</p>`;
+
+  const aprendizajeItems = grado ? getAprendizajesDe(grado, trimestre) : [];
+  const aprendizajesHtml = aprendizajeItems.length
+    ? `<div style="border:1.5px solid var(--line);border-radius:9px;padding:.9rem 1rem;margin-bottom:1rem">
+         <strong style="font-size:.76rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">📚 Planificación de Aprendizajes</strong>
+         <div style="margin-top:.5rem">${aprendizajeItems.map(renderAprendizajeItem).join('')}</div>
+       </div>`
+    : '';
 
   let reflexionHtml;
   if(refl && refl.registrado){
@@ -4097,6 +4248,7 @@ function parentAprendizajeTrimestreBlock(trimestre, rubrica, refl){
         <span>📘 Trimestre ${trimestre}</span> ${revisarBadge}
       </h3>
       ${rubricaHtml}
+      ${aprendizajesHtml}
       ${reflexionHtml}
     </div>
   `;
