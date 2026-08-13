@@ -505,7 +505,7 @@ let portal = {
   registroAlumnos: [], // [{id,name,grado,grupo,phone,originalGroup}]
   activities: [],     // [{id,title,desc,grado,grupo,dueDate,attachments:[{type,name,content,filename}],createdAt,visible}]
   submissions: [],    // [{id,activityId,studentCode,studentName,studentGrado,studentGrupo,files:[{name,content,size,mime}],note,submittedAt,updatedAt}]
-  rubricas: [],        // [{id,grado,grupo,trimestre,texto,createdAt,updatedAt}] — rúbricas / aprendizajes esperados por grado, grupo y trimestre
+  rubricaGlobal: null, // {texto,excelData:{filename,sheets},updatedAt} — rúbrica única, igual para todos los grados y grupos
   aprendizajes: [],    // [{id,grado,trimestre,tema,contenido,actividades,aprendera,orden}] — planificación de aprendizajes subida en Excel (por grado y trimestre)
   reflexiones: []       // [{id,studentCode,studentName,grado,grupo,trimestre,texto,registrado,registradoAt,revisado,revisadoAt}] — lo que el alumno escribió que aprendió
 };
@@ -607,7 +607,7 @@ function loadStore(){
       if(!portal.registroAlumnos) portal.registroAlumnos = [];
       if(!portal.activities) portal.activities = [];
       if(!portal.submissions) portal.submissions = [];
-      if(!portal.rubricas) portal.rubricas = [];
+      if(portal.rubricaGlobal === undefined) portal.rubricaGlobal = null;
       if(!portal.aprendizajes) portal.aprendizajes = [];
       if(!portal.reflexiones) portal.reflexiones = [];
       // Drop offloaded placeholders — Firebase will refill them
@@ -751,7 +751,7 @@ function subscribeFirebase(){
       portal.exams = v.exams || [];
       portal.registroAlumnos = v.registroAlumnos || [];
       portal.activities = v.activities || [];
-      portal.rubricas = v.rubricas || [];
+      portal.rubricaGlobal = v.rubricaGlobal || null;
       portal.aprendizajes = v.aprendizajes || [];
       // Only overwrite calif from portal/data if calificaciones/data hasn't pushed yet
       if(v.calif && !portal._califFromRegistro) portal.calif = v.calif;
@@ -892,7 +892,7 @@ function syncToFirebase(immediate){
       calif: portal.calif || null,
       registroAlumnos: portal.registroAlumnos || [],
       activities: portal.activities || [],
-      rubricas: portal.rubricas || [],
+      rubricaGlobal: portal.rubricaGlobal || null,
       aprendizajes: portal.aprendizajes || [],
       updatedAt: Date.now()
     }).catch(err=>{
@@ -962,7 +962,7 @@ function forcePublish(){
     calif: portal.calif || null,
     registroAlumnos: portal.registroAlumnos || [],
     activities: portal.activities || [],
-    rubricas: portal.rubricas || [],
+    rubricaGlobal: portal.rubricaGlobal || null,
     aprendizajes: portal.aprendizajes || [],
     updatedAt: Date.now()
   }).then(()=>{
@@ -1657,9 +1657,90 @@ function delMat(id){
 }
 
 // ── EXÁMENES ──
+// ── Examen de Diagnóstico oficial (Informática, 1er grado) ──
+const DIAGNOSTICO_INFORMATICA_1RO = {
+  title: 'Examen de Diagnóstico: Taller de Informática',
+  desc: 'Nivel: Primer Grado de Secundaria (Nuevo Ingreso). No te preocupes si no sabes alguna, este examen es para saber qué temas debemos aprender juntos.',
+  bloques: [
+    "Conceptos Básicos y Cuidado del Equipo",
+    "Sistema Operativo y Archivos",
+    "Procesador de Textos (Word)",
+    "Internet y Correo Electrónico",
+    "Presentaciones (PowerPoint)",
+    "Hoja de Cálculo (Excel)",
+    "Cultura Digital y Seguridad",
+  ],
+  questions: [
+    { q: "¿Cuál es el primer paso para usar una computadora de escritorio que está apagada?", opts: ["Mover el ratón rápidamente.","Presionar el botón de encendido en el CPU (gabinete).","Desconectar y conectar el teclado.","Limpiar la pantalla con un trapo húmedo."], correct: 1, bloque: 0 },
+    { q: "¿Cuál es la forma correcta de apagar la computadora para que no se dañe?", opts: ["Desconectando el cable de la pared.","Presionando el botón de encendido por mucho tiempo.","Ir al menú Inicio y seleccionar la opción \"Apagar\".","Apagar solamente el monitor."], correct: 2, bloque: 0 },
+    { q: "¿Qué parte de la computadora se usa para escribir letras y números?", opts: ["El monitor.","El teclado.","El ratón (mouse).","La impresora."], correct: 1, bloque: 0 },
+    { q: "Si quieres mover la flecha (cursor) en la pantalla, ¿qué dispositivo debes usar?", opts: ["El teclado.","El ratón (mouse).","Las bocinas.","El procesador."], correct: 1, bloque: 0 },
+    { q: "¿Qué componente se conoce como el \"cerebro\" de la computadora?", opts: ["El monitor.","El teclado.","El CPU (Procesador).","La memoria USB."], correct: 2, bloque: 0 },
+    { q: "¿Qué parte nos permite ver lo que estamos haciendo en la computadora?", opts: ["El monitor o pantalla.","El gabinete.","El tapete del ratón.","El cable de luz."], correct: 0, bloque: 0 },
+    { q: "¿Qué es el \"Hardware\"?", opts: ["Los juegos de la computadora.","Las partes físicas que podemos tocar (teclado, monitor, etc.).","Los virus que dañan la máquina.","Las páginas de internet."], correct: 1, bloque: 0 },
+    { q: "¿Cuál de estos es un ejemplo de \"Software\"?", opts: ["El ratón.","Los programas y aplicaciones (como Paint o Word).","El cable de corriente.","El monitor."], correct: 1, bloque: 0 },
+    { q: "¿Para qué sirve una memoria USB?", opts: ["Para que la computadora sea más rápida.","Para guardar y transportar información (archivos, fotos).","Para conectar la computadora a la luz.","Para imprimir dibujos."], correct: 1, bloque: 0 },
+    { q: "¿Qué debemos evitar hacer cerca de la computadora?", opts: ["Estudiar.","Escribir.","Comer o beber líquidos.","Escuchar música con audífonos."], correct: 2, bloque: 0 },
+    { q: "¿Qué es Windows o Android?", opts: ["Tipos de monitores.","Sistemas Operativos que permiten que la computadora o celular funcionen.","Marcas de impresoras.","Páginas para ver videos."], correct: 1, bloque: 1 },
+    { q: "¿Cómo se le llama a la primera pantalla que aparece después de encender la computadora?", opts: ["Habitación.","Escritorio.","Ventanal.","Menú de juegos."], correct: 1, bloque: 1 },
+    { q: "¿Qué es una \"carpeta\" en la computadora?", opts: ["Un objeto de plástico para guardar hojas reales.","Un lugar digital para organizar y guardar archivos.","Un programa para dibujar.","Una pieza del CPU."], correct: 1, bloque: 1 },
+    { q: "Si borras un archivo por error, ¿a dónde se va normalmente?", opts: ["Al correo electrónico.","A la Papelera de Reciclaje.","Se borra para siempre inmediatamente.","A la carpeta de descargas."], correct: 1, bloque: 1 },
+    { q: "¿Qué significa \"dar clic derecho\"?", opts: ["Presionar el botón del lado derecho del ratón para ver opciones.","Presionar el botón del lado izquierdo del ratón.","Golpear el ratón contra la mesa.","Desconectar el ratón."], correct: 0, bloque: 1 },
+    { q: "¿Para qué sirve principalmente Microsoft Word?", opts: ["Para hacer dibujos complejos.","Para crear documentos escritos (cartas, tareas, cuentos).","Para hacer cálculos matemáticos.","Para ver películas."], correct: 1, bloque: 2 },
+    { q: "Si quiero poner una palabra en \"Negrita\" para que resalte, ¿qué icono busco?", opts: ["Una letra N.","Una letra K.","Una letra S.","Una carita feliz."], correct: 0, bloque: 2 },
+    { q: "¿Qué tecla sirve para dejar un espacio entre palabras?", opts: ["Enter (Intro).","La barra espaciadora.","Bloq Mayús.","Esc (Escape)."], correct: 1, bloque: 2 },
+    { q: "¿Qué tecla se usa para bajar al siguiente renglón?", opts: ["Barra espaciadora.","Ctrl (Control).","Enter (Intro).","Shift (Mayús)."], correct: 2, bloque: 2 },
+    { q: "¿Cómo se llama la acción de cambiar el tipo de letra?", opts: ["Cambiar el color.","Cambiar la fuente.","Cambiar el papel.","Cambiar el fondo."], correct: 1, bloque: 2 },
+    { q: "¿Qué combinación de teclas se usa para \"Copiar\" un texto?", opts: ["Ctrl + C","Ctrl + V","Ctrl + Z","Ctrl + P"], correct: 0, bloque: 2 },
+    { q: "¿Qué combinación de teclas se usa para \"Pegar\" algo que copiaste?", opts: ["Ctrl + C","Ctrl + V","Ctrl + X","Ctrl + A"], correct: 1, bloque: 2 },
+    { q: "¿Para qué sirve el botón que tiene un dibujo de un disquete (o un cuadrado azul)?", opts: ["Para borrar el trabajo.","Para guardar el documento.","Para cerrar el programa.","Para imprimir."], correct: 1, bloque: 2 },
+    { q: "¿Cuál de estos botones sirve para centrar un título?", opts: ["El que tiene líneas alineadas a la izquierda.","El que tiene las líneas todas parejitas en medio.","El que tiene una letra \"A\" con color.","El que tiene un rayo."], correct: 1, bloque: 2 },
+    { q: "¿Qué sucede si presionas la tecla \"Bloq Mayús\"?", opts: ["Se apaga la computadora.","Todo lo que escribas saldrá en letras MAYÚSCULAS.","Se borra el último párrafo.","Se abre una página de internet."], correct: 1, bloque: 2 },
+    { q: "¿Qué es Internet?", opts: ["Un programa para escribir.","Una red mundial de computadoras conectadas para compartir información.","El cable que conecta el monitor al CPU.","Un tipo de videojuego."], correct: 1, bloque: 3 },
+    { q: "¿Cuál de estos es un \"Navegador\" (programa para entrar a internet)?", opts: ["Windows Media Player.","Google Chrome.","Excel.","Calculadora."], correct: 1, bloque: 3 },
+    { q: "¿Para qué sirve Google?", opts: ["Para dibujar paisajes.","Es un buscador que ayuda a encontrar información en internet.","Para prender la computadora.","Para arreglar el ratón."], correct: 1, bloque: 3 },
+    { q: "¿Cuál de estas es una dirección de correo electrónico escrita correctamente?", opts: ["www.alumno.com","alumno@gmail.com","alumno.facebook","@alumno.correo"], correct: 1, bloque: 3 },
+    { q: "¿Qué significa \"subir un archivo\" a internet?", opts: ["Poner la computadora en un estante alto.","Mandar un documento o foto desde mi computadora a una página o correo.","Borrar un archivo de la memoria USB.","Imprimir una foto de internet."], correct: 1, bloque: 3 },
+    { q: "¿Qué es el Wi-Fi?", opts: ["Una marca de computadoras baratas.","Una forma de conectar dispositivos a internet sin usar cables.","El nombre de un virus muy peligroso.","Un programa para hacer tablas."], correct: 1, bloque: 3 },
+    { q: "¿Qué debes hacer si una página de internet te pide tu nombre real, dirección o teléfono?", opts: ["Darlos de inmediato para poder entrar.","Inventar datos falsos.","No darlos y preguntar a un adulto o maestro.","Cerrar los ojos y darle clic a todo."], correct: 2, bloque: 3 },
+    { q: "¿Qué es una contraseña?", opts: ["Un nombre que todos pueden saber.","Una palabra o código secreto para proteger tu información.","El nombre del profesor de informática.","Un cable de conexión."], correct: 1, bloque: 3 },
+    { q: "¿Para qué sirve el botón \"Atrás\" (flecha a la izquierda) en un navegador?", opts: ["Para apagar el internet.","Para regresar a la página que estabas viendo antes.","Para borrar el historial.","Para ir al final de la página."], correct: 1, bloque: 3 },
+    { q: "¿Qué es el \"Ciberbullying\"?", opts: ["Usar internet para estudiar con amigos.","Usar internet o redes sociales para molestar o burlarse de otras personas.","Un programa para acelerar el internet.","Un tipo de ratón inalámbrico."], correct: 1, bloque: 3 },
+    { q: "¿Para qué se usa principalmente Microsoft PowerPoint?", opts: ["Para hacer cartas largas.","Para crear presentaciones con diapositivas (exposiciones).","Para escuchar música.","Para limpiar el disco duro."], correct: 1, bloque: 4 },
+    { q: "¿Cómo se le llama a cada una de las \"páginas\" de una presentación?", opts: ["Hojas.","Diapositivas.","Cuadros.","Fotos."], correct: 1, bloque: 4 },
+    { q: "¿Qué puedes agregar a una diapositiva?", opts: ["Solo texto.","Texto, imágenes, sonidos y videos.","Solo números.","Nada, ya vienen hechas."], correct: 1, bloque: 4 },
+    { q: "¿Qué tecla se usa para ver la presentación en pantalla completa?", opts: ["F1","F5","Esc","Borrar"], correct: 1, bloque: 4 },
+    { q: "¿Para qué sirven las \"Transiciones\" en PowerPoint?", opts: ["Para cambiar el color de la letra.","Para poner efectos de movimiento al pasar de una diapositiva a otra.","Para guardar el archivo en la nube.","Para revisar la ortografía."], correct: 1, bloque: 4 },
+    { q: "¿Qué programa es el mejor para organizar datos en tablas y hacer cuentas?", opts: ["Word.","Paint.","Excel.","PowerPoint."], correct: 2, bloque: 5 },
+    { q: "¿Cómo se le llama a los cuadritos donde escribimos en Excel?", opts: ["Botones.","Celdas.","Ventanas.","Puntos."], correct: 1, bloque: 5 },
+    { q: "¿Qué forma tiene una hoja de Excel?", opts: ["Una hoja en blanco para escribir cuentos.","Una cuadrícula (con filas y columnas).","Una pantalla de cine.","Un círculo."], correct: 1, bloque: 5 },
+    { q: "¿Con qué símbolo se debe empezar siempre una fórmula en Excel?", opts: ["Con un punto ( . )","Con el signo de igual ( = )","Con una letra ( A )","Con un asterisco ( * )"], correct: 1, bloque: 5 },
+    { q: "Si ves los números 1, 2, 3 en el lado izquierdo de Excel, ¿qué representan?", opts: ["Las columnas.","Las filas.","El precio de los programas.","El número de errores."], correct: 1, bloque: 5 },
+    { q: "¿Qué es un \"Virus\" informático?", opts: ["Una enfermedad que le da a la gente que usa mucho la PC.","Un programa malicioso que busca dañar la computadora o robar datos.","Un polvo que ensucia el monitor.","Una medicina para la computadora."], correct: 1, bloque: 6 },
+    { q: "¿Qué es una \"Red Social\"?", opts: ["Un sitio para hacer la tarea solo.","Una plataforma para conectarse y compartir con otras personas (como Facebook o WhatsApp).","Un tipo de cable de red.","Una reunión de profesores."], correct: 1, bloque: 6 },
+    { q: "¿Por qué es importante no compartir contraseñas con nadie (excepto tus padres)?", opts: ["Porque se pueden olvidar.","Para evitar que alguien entre a tus cuentas y use tu información.","Porque la computadora se vuelve lenta.","No es importante, se pueden compartir."], correct: 1, bloque: 6 },
+    { q: "¿Qué significa que un archivo esté en la \"Nube\"?", opts: ["Que se guardó en un satélite en el cielo.","Que está guardado en internet y puedes abrirlo desde cualquier computadora.","Que el archivo se borró por el clima.","Que el archivo es muy liviano."], correct: 1, bloque: 6 },
+    { q: "¿Cuál es la regla de oro al usar internet en la escuela?", opts: ["Descargar todos los juegos posibles.","Entrar solo a páginas educativas y autorizadas por el profesor.","Chatear con desconocidos.","Cambiarle la contraseña a las computadoras."], correct: 1, bloque: 6 },
+  ]
+};
+
 let examDraft = { title:'', desc:'', grado:'all', grupo:'all', questions:[] };
 
+let examSubView = 'crear'; // 'crear' | 'diagnostico'
+function setExamSubView(v){ examSubView = v; renderTeacherContent(); }
+
 function viewExams(){
+  const nav = `<div class="panel" style="padding:.8rem 1rem">
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap">
+      <button class="btn ${examSubView==='crear'?'btn-primary':'btn-sec'}" onclick="setExamSubView('crear')">📝 Crear / Editar Exámenes</button>
+      <button class="btn ${examSubView==='diagnostico'?'btn-primary':'btn-sec'}" onclick="setExamSubView('diagnostico')">🩺 Examen de Diagnóstico</button>
+    </div>
+  </div>`;
+  if(examSubView==='diagnostico') return nav + viewDiagnosticoSubfolder();
+  return nav + viewExamsCrear();
+}
+
+function viewExamsCrear(){
   return `
     <div class="panel">
       <h3>📄 Importar / Exportar examen Word</h3>
@@ -1809,6 +1890,212 @@ function renderExamList(){
     }).join('')
   }</div></div>`;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════
+   🩺 EXAMEN DE DIAGNÓSTICO (Informática, 1er grado) + Dashboard de análisis
+═══════════════════════════════════════════════════════════════════════ */
+function _getDiagnosticoExam(){
+  return (portal.exams||[]).find(e=>e.esDiagnostico===true);
+}
+
+function cargarExamenDiagnostico(){
+  const data = DIAGNOSTICO_INFORMATICA_1RO;
+  const existente = _getDiagnosticoExam();
+  const questions = data.questions.map(q=>({ q: q.q, opts: q.opts.slice(), correct: q.correct, bloque: q.bloque }));
+  if(existente){
+    existente.title = data.title;
+    existente.desc = data.desc;
+    existente.bloques = data.bloques.slice();
+    existente.questions = questions;
+    existente.grado = '1';
+    existente.grupo = 'all';
+    existente.visible = true;
+    existente.updatedAt = new Date().toISOString();
+    toast('✓ Examen de Diagnóstico actualizado a la versión más reciente','success');
+  } else {
+    portal.exams.push({
+      id: uid(), title: data.title, desc: data.desc,
+      grado: '1', grupo: 'all', esDiagnostico: true, bloques: data.bloques.slice(),
+      questions, createdAt: new Date().toISOString(), visible: true
+    });
+    toast('✓ Examen de Diagnóstico cargado — ya está disponible para 1er grado','success');
+  }
+  saveStore();
+  renderTeacherContent();
+}
+
+function eliminarExamenDiagnostico(){
+  const e = _getDiagnosticoExam();
+  if(!e) return;
+  if(!confirm('¿Quitar el Examen de Diagnóstico? Se conservarán los resultados ya registrados, pero los alumnos ya no podrán presentarlo hasta que lo vuelvas a cargar.')) return;
+  e.visible = false;
+  saveStore();
+  renderTeacherContent();
+  toast('Examen de Diagnóstico desactivado','success');
+}
+
+let diagGrupoFiltro = 'todos';
+function setDiagGrupoFiltro(v){ diagGrupoFiltro = v; renderTeacherContent(); }
+
+function viewDiagnosticoSubfolder(){
+  const exam = _getDiagnosticoExam();
+  let html = `<div class="panel" style="background:linear-gradient(135deg,#eef2ff,#e0e7ff);border:1.5px solid #6366f1">
+    <h3 style="color:#3730a3;margin-bottom:.3rem">🩺 Examen de Diagnóstico — Informática (1er Grado)</h3>
+    <p class="sub" style="margin:0">Evaluación de 50 preguntas, organizada en 7 bloques temáticos, para saber con qué conocimientos previos llegan tus alumnos de nuevo ingreso.</p>
+  </div>`;
+
+  if(!exam || !exam.visible){
+    html += `<div class="panel">
+      <p class="sub" style="margin-bottom:.8rem">${exam ? 'El examen está cargado pero desactivado.' : 'Aún no has cargado el examen oficial en el sistema.'}</p>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="cargarExamenDiagnostico()">📥 ${exam?'Reactivar':'Cargar'} Examen de Diagnóstico Oficial</button>
+      </div>
+      <p class="sub" style="margin-top:.7rem">Se aplicará automáticamente a <strong>todos los grupos de 1er grado</strong>. Los alumnos lo verán en su pestaña de Exámenes.</p>
+    </div>`;
+    return html;
+  }
+
+  html += `<div class="panel">
+    <p class="sub" style="margin:0">✅ Examen activo — <strong>${exam.questions.length} preguntas</strong> en <strong>${exam.bloques.length} bloques</strong>, aplicado a <strong>1° (todos los grupos)</strong>.</p>
+    <div class="btn-row" style="margin-top:.7rem">
+      <button class="btn btn-sec" onclick="cargarExamenDiagnostico()">🔄 Recargar versión oficial</button>
+      <button class="btn btn-danger" onclick="eliminarExamenDiagnostico()">🚫 Desactivar</button>
+    </div>
+  </div>`;
+
+  html += viewDiagnosticoDashboard(exam);
+  return html;
+}
+
+function viewDiagnosticoDashboard(exam){
+  const alumnos1 = getAlumnosDesdeCalif().filter(a=>a.grado==='1');
+  const gruposDisponibles = [...new Set(alumnos1.map(a=>a.grupo).filter(Boolean))].sort();
+  const grupoSel = diagGrupoFiltro;
+
+  const alumnosFiltrados = grupoSel==='todos' ? alumnos1 : alumnos1.filter(a=>a.grupo===grupoSel);
+  const codigosFiltrados = new Set(alumnosFiltrados.map(a=>_normCode(a.id)));
+
+  const resultados = (portal.examResults||[])
+    .filter(r=>r.examId===exam.id && codigosFiltrados.has(_normCode(r.studentCode)));
+
+  const nav = `<div class="panel" style="padding:.9rem 1.1rem">
+    <h3 style="margin-bottom:.7rem">📊 Dashboard de Resultados</h3>
+    <div class="form-group" style="max-width:260px">
+      <label>Filtrar por grupo</label>
+      <select onchange="setDiagGrupoFiltro(this.value)">
+        <option value="todos" ${grupoSel==='todos'?'selected':''}>Todos los grupos de 1°</option>
+        ${gruposDisponibles.map(g=>`<option value="${g}" ${grupoSel===g?'selected':''}>Grupo ${g}</option>`).join('')}
+      </select>
+    </div>
+  </div>`;
+
+  if(!alumnosFiltrados.length){
+    return nav + `<div class="empty" style="padding:1.5rem"><p style="margin:0">No hay alumnos registrados de 1er grado${grupoSel!=='todos'?` en el grupo ${grupoSel}`:''}.</p></div>`;
+  }
+  if(!resultados.length){
+    return nav + `<div class="empty" style="padding:1.5rem"><p style="margin:0">Aún nadie ha presentado el examen${grupoSel!=='todos'?` en el grupo ${grupoSel}`:''}.</p></div>`;
+  }
+
+  // ── Estadísticas generales ──
+  const PASA = 6; // calificación mínima aprobatoria (escala 0-10)
+  let aprobados=0, reprobados=0, sumaCalif=0;
+  resultados.forEach(r=>{
+    const calif = (r.score/r.total)*10;
+    sumaCalif += calif;
+    if(calif>=PASA) aprobados++; else reprobados++;
+  });
+  const promedioGrupo = (sumaCalif/resultados.length).toFixed(1);
+  const pctPresentados = Math.round((resultados.length/alumnosFiltrados.length)*100);
+
+  // ── Análisis por bloque (tema) ──
+  const bloqueStats = exam.bloques.map((nombre,bIdx)=>{
+    const preguntasDelBloque = exam.questions.map((q,i)=>({q,i})).filter(x=>x.q.bloque===bIdx);
+    let aciertos=0, total=0;
+    resultados.forEach(r=>{
+      preguntasDelBloque.forEach(({q,i})=>{
+        total++;
+        if(r.answers && r.answers[i]===q.correct) aciertos++;
+      });
+    });
+    const pct = total ? Math.round((aciertos/total)*100) : 0;
+    return { nombre, pct, aciertos, total, nPreguntas: preguntasDelBloque.length };
+  }).sort((a,b)=>a.pct-b.pct); // peor dominado primero
+
+  // ── Por alumno: calificación + bloques débiles (<50% de aciertos) ──
+  const porAlumno = resultados.map(r=>{
+    const alumno = alumnosFiltrados.find(a=>_normCode(a.id)===_normCode(r.studentCode));
+    const calif = (r.score/r.total)*10;
+    const bloquesDebiles = exam.bloques.map((nombre,bIdx)=>{
+      const preguntasDelBloque = exam.questions.map((q,i)=>({q,i})).filter(x=>x.q.bloque===bIdx);
+      if(!preguntasDelBloque.length || !r.answers) return null;
+      let ac=0;
+      preguntasDelBloque.forEach(({q,i})=>{ if(r.answers[i]===q.correct) ac++; });
+      const pct = ac/preguntasDelBloque.length;
+      return pct<0.5 ? nombre : null;
+    }).filter(Boolean);
+    return { nombre: r.studentName, grupo: alumno?alumno.grupo:'—', calif, bloquesDebiles };
+  }).sort((a,b)=>a.calif-b.calif);
+
+  return nav + `
+    <div class="panel">
+      <div style="display:flex;flex-wrap:wrap;gap:1rem">
+        <div style="flex:1;min-width:130px;background:var(--soft);border-radius:10px;padding:.9rem;text-align:center">
+          <div style="font-size:1.6rem;font-weight:700;color:var(--ink)">${resultados.length}/${alumnosFiltrados.length}</div>
+          <div class="sub" style="margin:0">Presentaron (${pctPresentados}%)</div>
+        </div>
+        <div style="flex:1;min-width:130px;background:#e8f5ec;border-radius:10px;padding:.9rem;text-align:center">
+          <div style="font-size:1.6rem;font-weight:700;color:var(--green)">${aprobados}</div>
+          <div class="sub" style="margin:0">Aprobados (≥6)</div>
+        </div>
+        <div style="flex:1;min-width:130px;background:#fdeaea;border-radius:10px;padding:.9rem;text-align:center">
+          <div style="font-size:1.6rem;font-weight:700;color:#c0392b">${reprobados}</div>
+          <div class="sub" style="margin:0">Reprobados</div>
+        </div>
+        <div style="flex:1;min-width:130px;background:#eef2fb;border-radius:10px;padding:.9rem;text-align:center">
+          <div style="font-size:1.6rem;font-weight:700;color:#3a5a9a">${promedioGrupo}</div>
+          <div class="sub" style="margin:0">Promedio del grupo</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>📚 Dominio por tema (bloque)</h3>
+      <p class="sub" style="margin-bottom:.8rem">Ordenado del tema que menos dominan al que más — enfoca el refuerzo en los primeros.</p>
+      ${bloqueStats.map(b=>`
+        <div style="margin-bottom:.7rem">
+          <div style="display:flex;justify-content:space-between;font-size:.85rem;margin-bottom:.25rem">
+            <span><strong>${escHtml(b.nombre)}</strong> <span class="sub" style="margin:0">(${b.nPreguntas} preg.)</span></span>
+            <span style="font-weight:700;color:${b.pct<50?'#c0392b':b.pct<75?'#b8860a':'#2a7a4b'}">${b.pct}%</span>
+          </div>
+          <div style="background:#eee;border-radius:6px;height:9px;overflow:hidden">
+            <div style="width:${b.pct}%;height:100%;background:${b.pct<50?'#c0392b':b.pct<75?'#d4a843':'#2a7a4b'}"></div>
+          </div>
+        </div>
+      `).join('')}
+    </div>
+
+    <div class="panel">
+      <h3>🧑‍🎓 Resultados por alumno</h3>
+      <p class="sub" style="margin-bottom:.8rem">Ordenado del que necesita más apoyo al que necesita menos. Los temas listados son donde ese alumno acertó menos de la mitad.</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Alumno</th><th style="width:70px;text-align:center">Grupo</th><th style="width:90px;text-align:center">Calif.</th><th>Temas a reforzar</th></tr></thead>
+          <tbody>
+            ${porAlumno.map(a=>`
+              <tr>
+                <td>${escHtml(a.nombre)}</td>
+                <td style="text-align:center">${escHtml(a.grupo)}</td>
+                <td style="text-align:center;font-weight:700;color:${a.calif<PASA?'#c0392b':'#2a7a4b'}">${a.calif.toFixed(1)}</td>
+                <td style="font-size:.82rem">${a.bloquesDebiles.length ? a.bloquesDebiles.map(b=>`<span class="pill" style="background:#fdeaea;color:#c0392b;margin:2px">${escHtml(b)}</span>`).join('') : '<span class="sub">— Ninguno, buen dominio general —</span>'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
 function toggleExam(id){
   const e = portal.exams.find(x=>x.id===id);
   if(e){ e.visible=!e.visible; saveStore(); renderTeacherContent(); }
@@ -2188,21 +2475,11 @@ function _dueStatus(dueIso){
    RÚBRICAS DE EVALUACIÓN / APRENDIZAJES ESPERADOS
    (por grado, grupo y trimestre — visible para padres)
 ═══════════════════════════════════════════ */
-let rubricaGradoSel = '1';
-let rubricaGrupoSel = 'A';
-let rubricaTrimestreSel = 1;
-
-function setRubricaGrado(v){ rubricaGradoSel = v; renderTeacherContent(); }
-function setRubricaGrupo(v){ rubricaGrupoSel = v; renderTeacherContent(); }
-function setRubricaTrimestre(t){ rubricaTrimestreSel = t; renderTeacherContent(); }
-
-function getRubrica(grado, grupo, trimestre){
-  return (portal.rubricas||[]).find(x=>
-    String(x.grado)===String(grado) &&
-    String(x.grupo||'').toUpperCase()===String(grupo||'').toUpperCase() &&
-    Number(x.trimestre)===Number(trimestre)
-  );
-}
+/* ═══════════════════════════════════════════════════════════════════════
+   RÚBRICA DE EVALUACIÓN (global — igual para todos los grados y grupos,
+   visible también en el Portal de Padres) + PLANIFICACIÓN DE APRENDIZAJES
+   (por trimestre y grado, editable directamente en el panel).
+═══════════════════════════════════════════════════════════════════════ */
 
 // Convierte una hoja de Excel (array de filas) en una tabla HTML legible.
 // Heurística: una fila con un solo valor no vacío se muestra como título
@@ -2237,106 +2514,10 @@ function renderExcelSheetTable(sheet){
   </div>`;
 }
 
-function viewRubricas(){
-  const grado = rubricaGradoSel;
-  const grupo = rubricaGrupoSel;
-  const t = rubricaTrimestreSel;
-  const trimNombres = {1:'Primer Trimestre', 2:'Segundo Trimestre', 3:'Tercer Trimestre'};
-  let html = `<div class="panel">
-    <h3>🎯 Rúbricas de evaluación y aprendizajes esperados</h3>
-    <p class="sub">Sube la rúbrica en Excel (o escribe los aprendizajes esperados) por grado, grupo y trimestre. Esta información aparece automáticamente en el Portal de Padres de Familia y en la tarjeta del Alumno.</p>
-    <div class="form-row">
-      <div class="form-group">
-        <label>Grado</label>
-        <select onchange="setRubricaGrado(this.value)">
-          <option value="1" ${grado==='1'?'selected':''}>1° Primero</option>
-          <option value="2" ${grado==='2'?'selected':''}>2° Segundo</option>
-          <option value="3" ${grado==='3'?'selected':''}>3° Tercero</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label>Grupo</label>
-        <select onchange="setRubricaGrupo(this.value)">
-          ${['A','B','C','D','E','F','G','H','I'].map(g=>`<option value="${g}" ${grupo===g?'selected':''}>Grupo ${g}</option>`).join('')}
-        </select>
-      </div>
-    </div>
-    <p class="sub" style="margin:0"><span class="pill pill-grado">${gradoLabel(grado)}</span> <span class="pill pill-grupo">Grupo ${grupo}</span></p>
-  </div>
-  <div class="panel" style="background:linear-gradient(135deg,#eef2ff,#e0e7ff);border:1.5px solid #6366f1">
-    <h3 style="color:#3730a3;margin-bottom:.3rem">📚 Planificación de Aprendizajes (Excel)</h3>
-    <p class="sub" style="margin:0 0 .8rem">Sube un archivo con columnas <strong>Trimestre | Tema/Unidad | Contenido Temático | Actividades Sugeridas | Lo que Aprenderá el Estudiante</strong>. Si el archivo trae una hoja por grado (ej. "1° Secundaria", "2° Secundaria", "3° Secundaria"), se detecta solo y se organiza por trimestre — no depende del Grado/Grupo elegidos arriba.</p>
-    <div class="btn-row" style="align-items:center;flex-wrap:wrap">
-      <input type="file" id="aprendizajesExcelInput" accept=".xlsx,.xls" style="max-width:240px">
-      <button class="btn btn-primary" onclick="subirAprendizajesExcel()">📤 Subir Planificación</button>
-      ${(portal.aprendizajes||[]).some(a=>a.grado===grado) ? `<button class="btn btn-danger" onclick="eliminarAprendizajesGrado('${grado}')">🗑️ Quitar de ${gradoLabel(grado)}</button>` : ''}
-    </div>
-    ${(() => {
-      const gradosConDatos = [...new Set((portal.aprendizajes||[]).map(a=>a.grado))].sort();
-      return gradosConDatos.length
-        ? `<p class="sub" style="margin:.7rem 0 0">Grados con planificación cargada: ${gradosConDatos.map(g=>`<span class="pill pill-grado">${gradoLabel(g)}</span>`).join(' ')}</p>`
-        : `<p class="sub" style="margin:.7rem 0 0">Aún no has subido ninguna planificación.</p>`;
-    })()}
-  </div>
-  <div class="panel" style="padding:.9rem 1.1rem">
-    <div style="display:flex;gap:.6rem;flex-wrap:wrap">
-      ${[1,2,3].map(tt=>`<button class="btn ${t===tt?'btn-primary':'btn-sec'}" onclick="setRubricaTrimestre(${tt})">${trimNombres[tt]}</button>`).join('')}
-    </div>
-  </div>`;
-  html += rubricaTrimestreBlock(grado, grupo, t);
-  return html;
-}
+/* ── RÚBRICA GLOBAL ─────────────────────────────────────────────────── */
 
-function rubricaTrimestreBlock(grado, grupo, trimestre){
-  const r = getRubrica(grado, grupo, trimestre);
-  const texto = r ? r.texto : '';
-  const excel = r && r.excelData;
-  const trimNombres = {1:'Primer', 2:'Segundo', 3:'Tercer'};
-  return `
-    <div class="panel">
-      <h3 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
-        <span>📘 ${trimNombres[trimestre]} Trimestre — ${gradoLabel(grado)} Grupo ${grupo}</span>
-        ${r ? `<button class="btn btn-danger" style="font-size:.75rem;padding:.3rem .7rem" onclick="eliminarRubrica('${r.id}')">🗑️ Eliminar todo</button>` : ''}
-      </h3>
-
-      <div style="background:var(--soft);border:1.5px solid var(--line);border-radius:10px;padding:1rem;margin-bottom:1rem">
-        <strong style="font-size:.85rem">📊 Rúbrica en Excel</strong>
-        <p class="sub" style="margin:.3rem 0 .7rem">Sube el archivo .xlsx con la rúbrica de evaluación. Los alumnos y padres la verán organizada en tablas, tal como la subiste.</p>
-        <div class="btn-row" style="align-items:center;flex-wrap:wrap">
-          <input type="file" id="rubExcelInput_${trimestre}" accept=".xlsx,.xls" style="max-width:220px">
-          <button class="btn btn-primary" onclick="subirRubricaExcel(${trimestre})">📤 Subir Excel</button>
-          ${excel ? `<button class="btn btn-danger" onclick="eliminarRubricaExcel(${trimestre})">🗑️ Quitar archivo</button>` : ''}
-        </div>
-        ${excel
-          ? `<p class="sub" style="margin:.7rem 0 0">📄 <strong>${escHtml(excel.filename)}</strong> — actualizado ${new Date(r.updatedAt).toLocaleString('es-MX')}</p>
-             <div style="margin-top:.9rem">${excel.sheets.map(sh=>renderExcelSheetTable(sh)).join('')}</div>`
-          : `<p class="sub" style="margin:.7rem 0 0">Aún no has subido ningún archivo para este trimestre.</p>`}
-      </div>
-
-      ${(() => {
-        const items = getAprendizajesDe(grado, trimestre);
-        if(!items.length) return '';
-        return `<div style="border:1.5px solid var(--line);border-radius:10px;padding:1rem;margin-bottom:1rem">
-          <strong style="font-size:.85rem">📚 Planificación de Aprendizajes (Excel) — ${gradoLabel(grado)}</strong>
-          <p class="sub" style="margin:.3rem 0 .7rem">${items.length} tema${items.length!==1?'s':''} cargado${items.length!==1?'s':''} para este trimestre. Aplica a todos los grupos de ${gradoLabel(grado)}.</p>
-          ${items.map(renderAprendizajeItem).join('')}
-        </div>`;
-      })()}
-
-      <div class="form-group">
-        <label>Aprendizajes esperados (texto libre, opcional)</label>
-        <textarea id="rubTxt_${trimestre}" rows="4" placeholder="Escribe aquí los aprendizajes esperados de este trimestre...">${escHtml(texto)}</textarea>
-      </div>
-      <div class="btn-row">
-        <button class="btn btn-sec" onclick="guardarRubrica(${trimestre})">💾 Guardar texto</button>
-      </div>
-      ${r ? `<p class="sub" style="margin:.7rem 0 0">Última actualización: ${new Date(r.updatedAt).toLocaleString('es-MX')}</p>` : ''}
-    </div>
-  `;
-}
-
-async function subirRubricaExcel(trimestre){
-  const inp = document.getElementById('rubExcelInput_'+trimestre);
+async function subirRubricaGlobalExcel(){
+  const inp = document.getElementById('rubricaGlobalExcelInput');
   const file = inp && inp.files && inp.files[0];
   if(!file){ toast('Selecciona un archivo Excel primero','error'); return; }
   toast('Leyendo el archivo…','success');
@@ -2348,36 +2529,64 @@ async function subirRubricaExcel(trimestre){
       name,
       rows: XLSX.utils.sheet_to_json(wb.Sheets[name], {header:1, defval:''})
     }));
-    guardarRubricaExcel(trimestre, file.name, sheets);
+    if(!portal.rubricaGlobal) portal.rubricaGlobal = {};
+    portal.rubricaGlobal.excelData = { filename: file.name, sheets };
+    portal.rubricaGlobal.updatedAt = new Date().toISOString();
+    saveStore();
+    renderTeacherContent();
+    toast('✓ Rúbrica cargada — se ve igual en todos los grados, grupos y en el Portal de Padres','success');
   }catch(err){
     toast('No se pudo leer el Excel: '+err.message,'error');
   }
 }
 
-function guardarRubricaExcel(trimestre, filename, sheets){
-  const grado = rubricaGradoSel;
-  const grupo = rubricaGrupoSel;
-  let r = getRubrica(grado, grupo, trimestre);
-  const now = new Date().toISOString();
-  if(r){
-    r.excelData = { filename, sheets };
-    r.updatedAt = now;
-  } else {
-    r = { id: uid(), grado, grupo, trimestre: Number(trimestre), texto:'', excelData:{ filename, sheets }, createdAt: now, updatedAt: now };
-    portal.rubricas.push(r);
-  }
+function guardarRubricaGlobalTexto(){
+  const ta = document.getElementById('rubricaGlobalTexto');
+  const texto = (ta ? ta.value : '').trim();
+  if(!portal.rubricaGlobal) portal.rubricaGlobal = {};
+  portal.rubricaGlobal.texto = texto;
+  portal.rubricaGlobal.updatedAt = new Date().toISOString();
   saveStore();
-  toast('✓ Rúbrica en Excel cargada — alumnos y padres ya pueden verla','success');
   renderTeacherContent();
+  toast('✓ Texto guardado','success');
 }
 
-/* ═══════════════════════════════════════════════════════════════════════
-   PLANIFICACIÓN DE APRENDIZAJES (Excel) — Trimestre, Tema/Unidad,
-   Contenido Temático, Actividades Sugeridas, Lo que Aprenderá el Estudiante.
-   Un solo archivo puede traer una hoja por grado (ej. "1° Secundaria",
-   "2° Secundaria", "3° Secundaria"); se detecta el grado por el nombre de
-   cada hoja y se organiza automáticamente por trimestre.
-═══════════════════════════════════════════════════════════════════════ */
+function eliminarRubricaGlobalExcel(){
+  if(!portal.rubricaGlobal || !portal.rubricaGlobal.excelData) return;
+  if(!confirm('¿Quitar el archivo Excel de la rúbrica? El texto libre (si tiene) no se borra.')) return;
+  delete portal.rubricaGlobal.excelData;
+  portal.rubricaGlobal.updatedAt = new Date().toISOString();
+  saveStore();
+  renderTeacherContent();
+  toast('Archivo eliminado','success');
+}
+
+function viewRubricaGlobalPanel(){
+  const rg = portal.rubricaGlobal;
+  const excel = rg && rg.excelData;
+  const texto = rg ? (rg.texto||'') : '';
+  return `<div class="panel">
+    <h3>📊 Rúbrica de Evaluación</h3>
+    <p class="sub">Esta rúbrica aplica igual para <strong>todos los grados y grupos</strong>, y también la verán los padres de familia en su Portal — no hace falta subirla por separado para cada grupo.</p>
+    <div class="btn-row" style="align-items:center;flex-wrap:wrap;margin-top:.4rem">
+      <input type="file" id="rubricaGlobalExcelInput" accept=".xlsx,.xls" style="max-width:240px">
+      <button class="btn btn-primary" onclick="subirRubricaGlobalExcel()">📤 Subir Excel</button>
+      ${excel ? `<button class="btn btn-danger" onclick="eliminarRubricaGlobalExcel()">🗑️ Quitar archivo</button>` : ''}
+    </div>
+    ${excel
+      ? `<p class="sub" style="margin:.7rem 0 0">📄 <strong>${escHtml(excel.filename)}</strong> — actualizado ${new Date(rg.updatedAt).toLocaleString('es-MX')}</p>
+         <div style="margin-top:.9rem">${excel.sheets.map(sh=>renderExcelSheetTable(sh)).join('')}</div>`
+      : `<p class="sub" style="margin:.7rem 0 0">Aún no has subido ningún archivo.</p>`}
+    <div class="form-group" style="margin-top:1rem">
+      <label>Notas adicionales (texto libre, opcional)</label>
+      <textarea id="rubricaGlobalTexto" rows="3" placeholder="Cualquier indicación adicional sobre la rúbrica...">${escHtml(texto)}</textarea>
+    </div>
+    <div class="btn-row"><button class="btn btn-sec" onclick="guardarRubricaGlobalTexto()">💾 Guardar texto</button></div>
+  </div>`;
+}
+
+/* ── PLANIFICACIÓN DE APRENDIZAJES (por trimestre y grado, editable) ── */
+
 const TRIM_PALABRA_A_NUM = { 'PRIMERO':1, 'PRIMER':1, 'SEGUNDO':2, 'TERCERO':3, 'TERCER':3 };
 function _parseTrimestreTexto(s){
   if(!s) return null;
@@ -2401,7 +2610,7 @@ function _parseAprendizajesSheet(rows){
     const restoLleno = [tema, contenido, actividades, aprendera].some(c => c !== null && c !== undefined && String(c).trim() !== '');
     if(!restoLleno) return; // fila de título o separador de trimestre vacío
     const trimestre = _parseTrimestreTexto(colTrim);
-    if(!trimestre) return; // fila de encabezado ("Trimestre | Tema/Unidad | ...") u otra cosa
+    if(!trimestre) return; // fila de encabezado u otra cosa
     items.push({
       trimestre,
       tema: String(tema||'').trim(),
@@ -2414,8 +2623,13 @@ function _parseAprendizajesSheet(rows){
   return items;
 }
 
-async function subirAprendizajesExcel(){
-  const inp = document.getElementById('aprendizajesExcelInput');
+let aprendTrimestreSel = 1; // pestaña de trimestre activa
+let aprendGradoSel = '1';   // sub-pestaña de grado activa dentro del trimestre
+function setAprendTrimestre(t){ aprendTrimestreSel = t; renderTeacherContent(); }
+function setAprendGrado(g){ aprendGradoSel = g; renderTeacherContent(); }
+
+async function subirAprendizajesExcel(trimestreOrigen){
+  const inp = document.getElementById('aprendizajesExcelInput_'+trimestreOrigen);
   const file = inp && inp.files && inp.files[0];
   if(!file){ toast('Selecciona un archivo Excel primero','error'); return; }
   toast('Leyendo el archivo…','success');
@@ -2431,7 +2645,8 @@ async function subirAprendizajesExcel(){
       const rows = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], {header:1, defval:''});
       const items = _parseAprendizajesSheet(rows);
       if(!items.length) return;
-      // Reemplaza lo que hubiera antes para ese grado (re-subir actualiza limpio)
+      // Reemplaza lo que hubiera antes para ese grado (re-subir actualiza limpio,
+      // en todos los trimestres que traiga el archivo)
       portal.aprendizajes = (portal.aprendizajes||[]).filter(a => a.grado !== grado);
       items.forEach(it=>{
         portal.aprendizajes.push({ id: uid(), grado, ...it });
@@ -2451,23 +2666,14 @@ async function subirAprendizajesExcel(){
   }
 }
 
-function eliminarAprendizajesGrado(grado){
-  if(!confirm(`¿Quitar toda la planificación de aprendizajes de ${gradoLabel(grado)}?`)) return;
-  portal.aprendizajes = (portal.aprendizajes||[]).filter(a => a.grado !== grado);
-  saveStore();
-  renderTeacherContent();
-  toast('Planificación eliminada','success');
-}
-
-// Items de aprendizajes de un grado+trimestre, en el orden en que venían en el Excel
+// Items de aprendizajes de un grado+trimestre, en el orden en que venían
 function getAprendizajesDe(grado, trimestre){
   return (portal.aprendizajes||[])
     .filter(a => a.grado===grado && Number(a.trimestre)===Number(trimestre))
     .sort((a,b)=>a.orden-b.orden);
 }
 
-// Tarjeta HTML de un tema/unidad de aprendizaje (reutilizable en maestro,
-// alumno y padres).
+// Tarjeta de solo lectura (usada en alumno y padres)
 function renderAprendizajeItem(it){
   return `<div style="background:white;border:1.5px solid var(--line);border-radius:9px;padding:.9rem 1rem;margin-bottom:.7rem">
     <div style="font-weight:700;font-size:.92rem;color:var(--accent);margin-bottom:.3rem">${escHtml(it.tema||'(Sin título)')}</div>
@@ -2477,43 +2683,132 @@ function renderAprendizajeItem(it){
   </div>`;
 }
 
-function eliminarRubricaExcel(trimestre){
-  const r = getRubrica(rubricaGradoSel, rubricaGrupoSel, trimestre);
-  if(!r || !r.excelData) return;
-  if(!confirm('¿Quitar el archivo Excel de esta rúbrica? El texto libre (si tiene) no se borra.')) return;
-  delete r.excelData;
-  r.updatedAt = new Date().toISOString();
-  saveStore();
-  renderTeacherContent();
-  toast('Archivo Excel eliminado','success');
+// Tarjeta editable (maestro): igual que la de solo lectura, con botones de editar/eliminar
+function renderAprendizajeItemEditable(it){
+  return `<div style="background:white;border:1.5px solid var(--line);border-radius:9px;padding:.9rem 1rem;margin-bottom:.7rem">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:.6rem">
+      <div style="font-weight:700;font-size:.92rem;color:var(--accent)">${escHtml(it.tema||'(Sin título)')}</div>
+      <div style="display:flex;gap:.4rem;flex-shrink:0">
+        <button class="btn btn-sec" style="padding:.25rem .6rem;font-size:.72rem" onclick="abrirEditorAprendizaje('${it.id}')">✏️ Editar</button>
+        <button class="btn btn-danger" style="padding:.25rem .6rem;font-size:.72rem" onclick="eliminarAprendizajeItem('${it.id}')">🗑️</button>
+      </div>
+    </div>
+    ${it.contenido?`<p style="margin:.3rem 0;font-size:.85rem;line-height:1.5"><strong style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">Contenido temático</strong><br>${escHtml(it.contenido)}</p>`:''}
+    ${it.actividades?`<p style="margin:.3rem 0;font-size:.85rem;line-height:1.5;white-space:pre-wrap"><strong style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">Actividades sugeridas</strong><br>${escHtml(it.actividades)}</p>`:''}
+    ${it.aprendera?`<p style="margin:.3rem 0 0;font-size:.85rem;line-height:1.5;background:var(--soft);border-radius:7px;padding:.6rem .7rem"><strong style="font-size:.72rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">🌱 Lo que aprenderá el estudiante</strong><br>${escHtml(it.aprendera)}</p>`:''}
+  </div>`;
 }
 
-function guardarRubrica(trimestre){
-  const grado = rubricaGradoSel;
-  const grupo = rubricaGrupoSel;
-  const ta = document.getElementById('rubTxt_'+trimestre);
-  const texto = (ta ? ta.value : '').trim();
-  let r = getRubrica(grado, grupo, trimestre);
-  const now = new Date().toISOString();
-  if(r){
-    r.texto = texto;
-    r.updatedAt = now;
+function abrirEditorAprendizaje(id, gradoNuevo, trimestreNuevo){
+  const existente = id ? (portal.aprendizajes||[]).find(a=>a.id===id) : null;
+  const grado = existente ? existente.grado : gradoNuevo;
+  const trimestre = existente ? existente.trimestre : trimestreNuevo;
+  const ex = document.getElementById('aprendizajeEditorModal'); if(ex) ex.remove();
+  const modal = document.createElement('div');
+  modal.id = 'aprendizajeEditorModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(26,26,46,.55);z-index:500;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);padding:20px';
+  modal.innerHTML = `<div style="background:white;border-radius:14px;padding:26px;width:560px;max-width:96vw;max-height:86vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.3)">
+    <div style="font-family:'DM Serif Display',serif;font-size:1.2rem;margin-bottom:4px">${existente?'✏️ Editar':'➕ Agregar'} tema de aprendizaje</div>
+    <p class="sub" style="margin:0 0 1rem">${gradoLabel(grado)} · Trimestre ${trimestre}</p>
+    <div class="form-group"><label>Tema / Unidad</label><input type="text" id="apItemTema" value="${escHtml(existente?existente.tema:'')}" placeholder="Ej: Introducción al Hardware"></div>
+    <div class="form-group"><label>Contenido Temático</label><textarea id="apItemContenido" rows="2" placeholder="Ej: Reconocimiento físico de componentes...">${escHtml(existente?existente.contenido:'')}</textarea></div>
+    <div class="form-group"><label>Actividades Sugeridas</label><textarea id="apItemActividades" rows="3" placeholder="1. ...\n2. ...">${escHtml(existente?existente.actividades:'')}</textarea></div>
+    <div class="form-group"><label>Lo que Aprenderá el Estudiante</label><textarea id="apItemAprendera" rows="3">${escHtml(existente?existente.aprendera:'')}</textarea></div>
+    <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:12px">
+      <button onclick="document.getElementById('aprendizajeEditorModal').remove()" class="btn btn-sec">Cancelar</button>
+      <button onclick="guardarAprendizajeItem(${existente?`'${existente.id}'`:'null'},'${grado}',${trimestre})" class="btn btn-primary">✅ Guardar</button>
+    </div>
+  </div>`;
+  document.body.appendChild(modal);
+  modal.addEventListener('click', e=>{ if(e.target===modal) modal.remove(); });
+  setTimeout(()=>{ const i=document.getElementById('apItemTema'); if(i) i.focus(); }, 80);
+}
+
+function guardarAprendizajeItem(id, grado, trimestre){
+  const tema = document.getElementById('apItemTema').value.trim();
+  const contenido = document.getElementById('apItemContenido').value.trim();
+  const actividades = document.getElementById('apItemActividades').value.trim();
+  const aprendera = document.getElementById('apItemAprendera').value.trim();
+  if(!tema){ toast('Escribe al menos el tema/unidad','error'); return; }
+  if(id){
+    const it = (portal.aprendizajes||[]).find(a=>a.id===id);
+    if(it){ it.tema=tema; it.contenido=contenido; it.actividades=actividades; it.aprendera=aprendera; }
   } else {
-    if(!texto){ toast('Escribe algo o sube un Excel primero','error'); return; }
-    r = { id: uid(), grado, grupo, trimestre: Number(trimestre), texto, createdAt: now, updatedAt: now };
-    portal.rubricas.push(r);
+    if(!portal.aprendizajes) portal.aprendizajes = [];
+    const maxOrden = Math.max(-1, ...getAprendizajesDe(grado,trimestre).map(a=>a.orden||0));
+    portal.aprendizajes.push({ id: uid(), grado, trimestre: Number(trimestre), tema, contenido, actividades, aprendera, orden: maxOrden+1 });
   }
   saveStore();
-  toast('✓ Texto guardado','success');
+  const m = document.getElementById('aprendizajeEditorModal'); if(m) m.remove();
   renderTeacherContent();
+  toast('✓ Guardado','success');
 }
 
-function eliminarRubrica(id){
-  if(!confirm('¿Eliminar por completo esta rúbrica (texto y Excel) de este trimestre?')) return;
-  portal.rubricas = portal.rubricas.filter(x=>x.id!==id);
+function eliminarAprendizajeItem(id){
+  if(!confirm('¿Eliminar este tema de la planificación?')) return;
+  portal.aprendizajes = (portal.aprendizajes||[]).filter(a=>a.id!==id);
   saveStore();
   renderTeacherContent();
-  toast('Rúbrica eliminada','success');
+  toast('Tema eliminado','success');
+}
+
+function eliminarAprendizajesGrado(grado){
+  if(!confirm(`¿Quitar toda la planificación de aprendizajes de ${gradoLabel(grado)} (los 3 trimestres)?`)) return;
+  portal.aprendizajes = (portal.aprendizajes||[]).filter(a => a.grado !== grado);
+  saveStore();
+  renderTeacherContent();
+  toast('Planificación eliminada','success');
+}
+
+function viewAprendizajesTrimestreBlock(trimestre, gradoV){
+  const trimNombres = {1:'Primer', 2:'Segundo', 3:'Tercer'};
+  const items = getAprendizajesDe(gradoV, trimestre);
+  return `
+    <div class="panel">
+      <h3 style="margin-bottom:.6rem">📘 ${trimNombres[trimestre]} Trimestre</h3>
+
+      <div style="background:var(--soft);border:1.5px solid var(--line);border-radius:10px;padding:1rem;margin-bottom:1rem">
+        <strong style="font-size:.85rem">📤 Subir Excel para este trimestre</strong>
+        <p class="sub" style="margin:.3rem 0 .7rem">Columnas: Trimestre | Tema/Unidad | Contenido Temático | Actividades Sugeridas | Lo que Aprenderá el Estudiante. Si trae una hoja por grado (ej. "1° Secundaria", "2° Secundaria"), se detecta solo — no depende del grado elegido abajo.</p>
+        <div class="btn-row" style="align-items:center;flex-wrap:wrap">
+          <input type="file" id="aprendizajesExcelInput_${trimestre}" accept=".xlsx,.xls" style="max-width:230px">
+          <button class="btn btn-primary" onclick="subirAprendizajesExcel(${trimestre})">📤 Subir</button>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:.6rem;margin-bottom:.9rem">
+        <div style="display:flex;gap:.5rem;flex-wrap:wrap">
+          ${['1','2','3'].map(g=>`<button class="btn ${gradoV===g?'btn-primary':'btn-sec'}" onclick="setAprendGrado('${g}')" style="padding:.4rem .9rem;font-size:.82rem">${gradoLabel(g)}</button>`).join('')}
+        </div>
+        <button class="btn btn-sec" onclick="abrirEditorAprendizaje(null,'${gradoV}',${trimestre})">➕ Agregar tema</button>
+      </div>
+
+      ${items.length
+        ? items.map(it=>renderAprendizajeItemEditable(it)).join('')
+        : `<div class="empty" style="padding:1rem"><p style="margin:0">Sin temas cargados para ${gradoLabel(gradoV)} en este trimestre. Sube un Excel o agrega uno manualmente.</p></div>`}
+    </div>
+  `;
+}
+
+function viewAprendizajesPanel(){
+  const t = aprendTrimestreSel;
+  const gradoV = aprendGradoSel;
+  const trimNombres = {1:'Primer Trimestre', 2:'Segundo Trimestre', 3:'Tercer Trimestre'};
+  let html = `<div class="panel" style="background:linear-gradient(135deg,#eef2ff,#e0e7ff);border:1.5px solid #6366f1">
+    <h3 style="color:#3730a3;margin-bottom:.3rem">📚 Planificación de Aprendizajes</h3>
+    <p class="sub" style="margin:0">Esta información sí es distinta para 1°, 2° y 3° — súbela por Excel o edítala directamente aquí, tema por tema.</p>
+  </div>
+  <div class="panel" style="padding:.9rem 1.1rem">
+    <div style="display:flex;gap:.6rem;flex-wrap:wrap">
+      ${[1,2,3].map(tt=>`<button class="btn ${t===tt?'btn-primary':'btn-sec'}" onclick="setAprendTrimestre(${tt})">${trimNombres[tt]}</button>`).join('')}
+    </div>
+  </div>`;
+  html += viewAprendizajesTrimestreBlock(t, gradoV);
+  return html;
+}
+
+function viewRubricas(){
+  return viewRubricaGlobalPanel() + viewAprendizajesPanel();
 }
 
 function viewActivities(){
@@ -3943,7 +4238,8 @@ function submitExam(){
   currentExam.questions.forEach((q,i)=>{ if(examAnswers[i]===q.correct) score++; });
   const result = {
     examId: currentExam.id, studentCode: session.code, studentName: session.label,
-    score, total: currentExam.questions.length, date: new Date().toISOString()
+    score, total: currentExam.questions.length, date: new Date().toISOString(),
+    answers: examAnswers.slice()
   };
   portal.examResults.push(result);
   _persistLocal();
@@ -4042,32 +4338,29 @@ function reflexionTrimestreCard(trimestre){
 // "¿Qué estoy aprendiendo?" para no mezclar la rúbrica del maestro con
 // la reflexión propia del alumno.
 function renderStudentRubrica(){
+  const rg = portal.rubricaGlobal;
   let html = `<div class="panel" style="background:linear-gradient(135deg,#eef2ff,#e0e7ff);border:1.5px solid #6366f1">
     <h3 style="color:#3730a3;margin-bottom:.3rem">📊 Rúbrica de evaluación</h3>
-    <p class="sub" style="margin:0">Esto es lo que tu maestro(a) publicó: los aprendizajes esperados y/o la rúbrica en Excel de cada trimestre.</p>
+    <p class="sub" style="margin:0">Esto es lo que tu maestro(a) publicó.</p>
   </div>`;
-  [1,2,3].forEach(t=>{ html += rubricaTrimestreCardAlumno(t); });
+  html += `<div class="panel">
+    ${(rg && (rg.texto || rg.excelData)) ? `
+      ${rg.texto ? `<p style="white-space:pre-wrap;line-height:1.55;background:var(--soft);border:1.5px solid var(--line);border-radius:9px;padding:.9rem 1rem;margin-bottom:${rg.excelData?'1rem':'0'}">${escHtml(rg.texto)}</p>` : ''}
+      ${rg.excelData ? rg.excelData.sheets.map(sh=>renderExcelSheetTable(sh)).join('') : ''}
+    ` : `<div class="empty" style="padding:1rem"><p style="margin:0">Tu maestro(a) aún no ha publicado la rúbrica.</p></div>`}
+  </div>`;
+  html += `<div class="panel" style="margin-top:.2rem"><h3 style="margin-bottom:.2rem">📚 Planificación de Aprendizajes</h3><p class="sub" style="margin:0">Organizada por trimestre.</p></div>`;
+  [1,2,3].forEach(t=>{ html += aprendizajeTrimestreCardAlumno(t); });
   return html;
 }
 
-function rubricaTrimestreCardAlumno(trimestre){
-  const rubrica = getRubrica(session.grado, session.grupo, trimestre);
+function aprendizajeTrimestreCardAlumno(trimestre){
   const trimNombres = {1:'Primer', 2:'Segundo', 3:'Tercer'};
-  const tieneContenido = rubrica && (rubrica.texto || rubrica.excelData);
-  const aprendizajeItems = session.grado ? getAprendizajesDe(session.grado, trimestre) : [];
+  const items = session.grado ? getAprendizajesDe(session.grado, trimestre) : [];
   return `
     <div class="panel">
       <h3>📘 ${trimNombres[trimestre]} Trimestre</h3>
-      ${tieneContenido ? `
-        ${rubrica.texto ? `<p style="white-space:pre-wrap;line-height:1.55;background:var(--soft);border:1.5px solid var(--line);border-radius:9px;padding:.9rem 1rem;margin-bottom:${rubrica.excelData?'1rem':'0'}">${escHtml(rubrica.texto)}</p>` : ''}
-        ${rubrica.excelData ? rubrica.excelData.sheets.map(sh=>renderExcelSheetTable(sh)).join('') : ''}
-      ` : (aprendizajeItems.length ? '' : `<div class="empty" style="padding:1rem"><p style="margin:0">Tu maestro(a) aún no ha publicado la rúbrica de este trimestre.</p></div>`)}
-      ${aprendizajeItems.length ? `
-        <div style="margin-top:${tieneContenido?'1rem':'0'}">
-          <strong style="font-size:.76rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">📚 Planificación de Aprendizajes</strong>
-          <div style="margin-top:.5rem">${aprendizajeItems.map(renderAprendizajeItem).join('')}</div>
-        </div>
-      ` : ''}
+      ${items.length ? items.map(renderAprendizajeItem).join('') : `<div class="empty" style="padding:1rem"><p style="margin:0">Tu maestro(a) aún no ha publicado la planificación de este trimestre.</p></div>`}
     </div>
   `;
 }
@@ -4193,34 +4486,33 @@ function renderParentContent(){
 
 /* ── Aprendizajes (rúbrica del maestro + reflexión del alumno, por trimestre) ── */
 function renderParentAprendizaje(){
-  const grado = session.grado, grupo = session.grupo;
+  const grado = session.grado;
+  const rg = portal.rubricaGlobal;
   let html = `<div class="panel" style="background:linear-gradient(135deg,#eef2ff,#e0e7ff);border:1.5px solid #6366f1">
     <h3 style="color:#3730a3;margin-bottom:.3rem">🎯 Aprendizajes de ${escHtml(session.studentName||'')}</h3>
-    <p class="sub" style="margin:0">Aquí puedes ver los aprendizajes esperados que definió el maestro y lo que tu hijo(a) escribió que aprendió, organizado por trimestre.</p>
+    <p class="sub" style="margin:0">Aquí puedes ver la rúbrica de evaluación, la planificación de aprendizajes y lo que tu hijo(a) escribió, organizado por trimestre.</p>
+  </div>`;
+  html += `<div class="panel">
+    <h3 style="margin-bottom:.5rem">📊 Rúbrica de evaluación</h3>
+    ${(rg && (rg.texto || rg.excelData)) ? `
+      ${rg.texto ? `<p style="white-space:pre-wrap;line-height:1.5;background:var(--soft);border:1.5px solid var(--line);border-radius:9px;padding:.9rem 1rem;margin-bottom:${rg.excelData?'1rem':'0'}">${escHtml(rg.texto)}</p>` : ''}
+      ${rg.excelData ? rg.excelData.sheets.map(sh=>renderExcelSheetTable(sh)).join('') : ''}
+    ` : `<p class="sub" style="margin:0">El maestro aún no ha publicado la rúbrica.</p>`}
   </div>`;
   [1,2,3].forEach(t=>{
-    const rubrica = getRubrica(grado, grupo, t);
     const refl = (portal.reflexiones||[]).find(r=>_normCode(r.studentCode)===_normCode(session.code) && Number(r.trimestre)===t);
-    html += parentAprendizajeTrimestreBlock(t, rubrica, refl, grado);
+    html += parentAprendizajeTrimestreBlock(t, refl, grado);
   });
   return html;
 }
 
-function parentAprendizajeTrimestreBlock(trimestre, rubrica, refl, grado){
+function parentAprendizajeTrimestreBlock(trimestre, refl, grado){
   let revisarBadge = '';
   if(refl && refl.registrado && !refl.revisado){
     revisarBadge = `<span class="pill" style="background:#fee2e2;color:#991b1b;animation:livePulse 2s ease-in-out infinite">🔴 Revisar</span>`;
   } else if(refl && refl.registrado && refl.revisado){
     revisarBadge = `<span class="pill pill-on">✔️ Revisado</span>`;
   }
-
-  const rubricaHtml = (rubrica && (rubrica.texto || rubrica.excelData))
-    ? `<div style="background:var(--soft);padding:.9rem 1rem;border-radius:9px;border:1px solid var(--line);margin-bottom:1rem">
-         <strong style="font-size:.76rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2)">🎯 Rúbrica del maestro</strong>
-         ${rubrica.texto ? `<p style="margin-top:.4rem;white-space:pre-wrap;line-height:1.5">${escHtml(rubrica.texto)}</p>` : ''}
-         ${rubrica.excelData ? `<div style="margin-top:${rubrica.texto?'.8rem':'.4rem'}">${rubrica.excelData.sheets.map(sh=>renderExcelSheetTable(sh)).join('')}</div>` : ''}
-       </div>`
-    : `<p class="sub">El maestro aún no ha publicado la rúbrica de este trimestre.</p>`;
 
   const aprendizajeItems = grado ? getAprendizajesDe(grado, trimestre) : [];
   const aprendizajesHtml = aprendizajeItems.length
@@ -4247,7 +4539,6 @@ function parentAprendizajeTrimestreBlock(trimestre, rubrica, refl, grado){
       <h3 style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem">
         <span>📘 Trimestre ${trimestre}</span> ${revisarBadge}
       </h3>
-      ${rubricaHtml}
       ${aprendizajesHtml}
       ${reflexionHtml}
     </div>
