@@ -411,6 +411,57 @@ body.parent-mode .panel h3{
 body.parent-mode .tab.active{
   background:linear-gradient(180deg,transparent 60%,rgba(59,130,246,0.08) 100%);
 }
+
+/* ── 🎨 Personalización del alumno ─────────────────────────────────── */
+.emoji-bg{
+  position:fixed; inset:0; z-index:0; pointer-events:none; overflow:hidden;
+  display:none; opacity:.16; user-select:none;
+}
+.emoji-bg-row{
+  white-space:nowrap; font-size:1.8rem; line-height:2.6rem; letter-spacing:.4rem;
+  transform:rotate(-8deg) scale(1.15); transform-origin:center;
+}
+.app, .landing{ position:relative; z-index:1; }
+
+#userAvatar{ font-size:1.2rem; margin-right:.3rem; vertical-align:middle; }
+
+.tema-swatch, .fondo-swatch, .avatar-opt{
+  cursor:pointer; border-radius:12px; border:2.5px solid transparent; transition:transform .15s, border-color .15s;
+  display:flex; flex-direction:column; align-items:center; gap:.35rem; padding:.7rem .5rem; background:var(--card);
+}
+.tema-swatch:hover, .fondo-swatch:hover, .avatar-opt:hover{ transform:translateY(-3px); }
+.tema-swatch.selected, .fondo-swatch.selected, .avatar-opt.selected{ border-color:var(--ink); box-shadow:0 4px 14px rgba(0,0,0,.12); }
+.tema-swatch-dot{ width:34px; height:34px; border-radius:50%; box-shadow:inset 0 0 0 3px rgba(255,255,255,.5); }
+.fondo-swatch-preview{ font-size:1.3rem; letter-spacing:.15rem; }
+.avatar-opt{ font-size:1.7rem; padding:.5rem; }
+.pers-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(84px,1fr)); gap:.6rem; }
+.avatar-grid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(54px,1fr)); gap:.5rem; }
+
+/* Confeti */
+.confetti-piece{
+  position:fixed; top:-20px; width:9px; height:14px; z-index:9998; pointer-events:none;
+  animation:confettiFall linear forwards; border-radius:2px;
+}
+@keyframes confettiFall{
+  0%{ transform:translateY(0) rotate(0deg); opacity:1; }
+  100%{ transform:translateY(105vh) rotate(540deg); opacity:.85; }
+}
+
+/* Partículas flotantes */
+.float-emoji-particle{
+  position:fixed; bottom:-40px; font-size:1.6rem; z-index:9997; pointer-events:none;
+  animation:floatUp linear forwards;
+}
+@keyframes floatUp{
+  0%{ transform:translateY(0) translateX(0); opacity:0; }
+  10%{ opacity:.9; }
+  90%{ opacity:.8; }
+  100%{ transform:translateY(-110vh) translateX(20px); opacity:0; }
+}
+
+/* Brillito al tocar botones (si está activo) */
+.btn.sparkle-on:active{ animation:sparklePulse .25s ease; }
+@keyframes sparklePulse{ 0%{transform:scale(1);} 50%{transform:scale(.94);} 100%{transform:scale(1);} }
 </style>
 </head>
 <body>
@@ -466,6 +517,7 @@ body.parent-mode .tab.active{
     <div class="brand"><span id="brandIcon">📚</span><span id="brandText">Portal Escolar de Informática</span></div>
     <div class="user">
       <span id="connDot" class="conn-dot connecting"><span class="dot"></span><span id="connLabel">Conectando…</span></span>
+      <span id="userAvatar"></span>
       <span id="userLabel"></span>
       <button class="btn-logout" onclick="logout()">Salir</button>
     </div>
@@ -1166,7 +1218,199 @@ function loginParent(){
   showApp();
 }
 
+/* ═══════════════════════════════════════════
+   🎨 PERSONALIZACIÓN DEL ALUMNO
+   Tema de color, fondo de emojis, avatar y animaciones.
+   Se guarda por alumno (localStorage, según su código) y se aplica
+   en vivo apenas la elige — sin afectar a otros alumnos ni al maestro.
+═══════════════════════════════════════════ */
+const TEMAS_COLOR = {
+  clasico:   { nombre:'Clásico',   accent:'#c94444', accent2:'#185FA5', emoji:'🎨' },
+  oceano:    { nombre:'Océano',    accent:'#0891b2', accent2:'#0e7490', emoji:'🌊' },
+  fuego:     { nombre:'Fuego',     accent:'#ea580c', accent2:'#dc2626', emoji:'🔥' },
+  bosque:    { nombre:'Bosque',    accent:'#16a34a', accent2:'#15803d', emoji:'🌲' },
+  neon:      { nombre:'Neón',      accent:'#d946ef', accent2:'#8b5cf6', emoji:'💜' },
+  atardecer: { nombre:'Atardecer', accent:'#f97316', accent2:'#ec4899', emoji:'🌅' },
+  espacio:   { nombre:'Espacio',   accent:'#6366f1', accent2:'#4338ca', emoji:'🌌' },
+  menta:     { nombre:'Menta',     accent:'#14b8a6', accent2:'#0d9488', emoji:'🍃' }
+};
+const FONDOS_EMOJI = {
+  ninguno:   { nombre:'Ninguno',   emojis:null },
+  gamer:     { nombre:'Gamer',     emojis:['🎮','🕹️','👾','🎯'] },
+  deportes:  { nombre:'Deportes',  emojis:['⚽','🏀','🏈','🎾'] },
+  animales:  { nombre:'Animales',  emojis:['🐶','🐱','🦊','🐼'] },
+  espacio:   { nombre:'Espacio',   emojis:['⭐','🌙','🚀','🪐'] },
+  flores:    { nombre:'Flores',    emojis:['🌸','🌺','🌼','🌻'] },
+  musica:    { nombre:'Música',    emojis:['🎵','🎸','🎧','🎤'] },
+  corazones: { nombre:'Corazones', emojis:['❤️','💜','💙','💛'] },
+  comida:    { nombre:'Comida',    emojis:['🍕','🍔','🍟','🍩'] }
+};
+const AVATARES_ALUMNO = ['🙂','😎','🤓','🥳','😺','🐶','🦊','🐼','🦁','🐨','🐯','🦄',
+  '🐸','🐵','🤖','👽','🎮','⚽','🎸','🎨','🚀','⭐','🔥','🌈'];
+
+let personalizacion = { tema:'clasico', fondo:'ninguno', avatar:'🙂', animConfeti:true, animParticulas:false };
+
+function _persKey(){ return 'portalPersonalizacion_' + _normCode(session ? session.code : ''); }
+function cargarPersonalizacion(){
+  personalizacion = { tema:'clasico', fondo:'ninguno', avatar:'🙂', animConfeti:true, animParticulas:false };
+  try{
+    const raw = localStorage.getItem(_persKey());
+    if(raw) personalizacion = Object.assign(personalizacion, JSON.parse(raw));
+  }catch(e){}
+  aplicarPersonalizacion();
+}
+function guardarPersonalizacion(){
+  try{ localStorage.setItem(_persKey(), JSON.stringify(personalizacion)); }catch(e){}
+}
+
+function aplicarPersonalizacion(){
+  const tema = TEMAS_COLOR[personalizacion.tema] || TEMAS_COLOR.clasico;
+  document.documentElement.style.setProperty('--accent', tema.accent);
+  document.documentElement.style.setProperty('--accent2', tema.accent2);
+
+  let bg = document.getElementById('emojiBgLayer');
+  const fondoDef = FONDOS_EMOJI[personalizacion.fondo];
+  if(fondoDef && fondoDef.emojis){
+    if(!bg){
+      bg = document.createElement('div');
+      bg.id = 'emojiBgLayer';
+      bg.className = 'emoji-bg';
+      document.body.insertBefore(bg, document.body.firstChild);
+    }
+    const emojis = fondoDef.emojis;
+    let rows = '';
+    for(let r=0; r<16; r++){
+      let row = '';
+      for(let c=0; c<12; c++){ row += emojis[(r+c)%emojis.length] + '  '; }
+      rows += `<div class="emoji-bg-row">${row}</div>`;
+    }
+    bg.innerHTML = rows;
+    bg.style.display = 'block';
+  } else if(bg){
+    bg.style.display = 'none';
+  }
+
+  const av = document.getElementById('userAvatar');
+  if(av) av.textContent = (session && session.role==='student') ? (personalizacion.avatar||'') : '';
+
+  if(session && session.role==='student' && personalizacion.animParticulas) iniciarParticulasFlotantes();
+  else detenerParticulasFlotantes();
+}
+
+function lanzarConfeti(){
+  if(!personalizacion.animConfeti) return;
+  const colores = ['#f43f5e','#fb923c','#facc15','#4ade80','#38bdf8','#a78bfa','#f472b6'];
+  for(let i=0; i<40; i++){
+    const p = document.createElement('div');
+    p.className = 'confetti-piece';
+    p.style.left = (Math.random()*100)+'vw';
+    p.style.background = colores[Math.floor(Math.random()*colores.length)];
+    p.style.animationDuration = (2 + Math.random()*1.5)+'s';
+    p.style.animationDelay = (Math.random()*0.4)+'s';
+    document.body.appendChild(p);
+    setTimeout(()=>p.remove(), 4200);
+  }
+}
+
+let _particulasInterval = null;
+function iniciarParticulasFlotantes(){
+  detenerParticulasFlotantes();
+  const fondoDef = FONDOS_EMOJI[personalizacion.fondo];
+  const emojis = (fondoDef && fondoDef.emojis) ? fondoDef.emojis : ['✨','⭐','💫'];
+  _particulasInterval = setInterval(()=>{
+    const p = document.createElement('div');
+    p.className = 'float-emoji-particle';
+    p.textContent = emojis[Math.floor(Math.random()*emojis.length)];
+    p.style.left = (Math.random()*96)+'vw';
+    p.style.animationDuration = (5 + Math.random()*4)+'s';
+    document.body.appendChild(p);
+    setTimeout(()=>p.remove(), 9200);
+  }, 1300);
+}
+function detenerParticulasFlotantes(){
+  if(_particulasInterval){ clearInterval(_particulasInterval); _particulasInterval = null; }
+}
+
+function elegirTema(id){ personalizacion.tema = id; guardarPersonalizacion(); aplicarPersonalizacion(); renderStudentContent(); }
+function elegirFondo(id){ personalizacion.fondo = id; guardarPersonalizacion(); aplicarPersonalizacion(); renderStudentContent(); }
+function elegirAvatar(emoji){ personalizacion.avatar = emoji; guardarPersonalizacion(); aplicarPersonalizacion(); renderStudentContent(); }
+function toggleAnimConfeti(){ personalizacion.animConfeti = !personalizacion.animConfeti; guardarPersonalizacion(); if(personalizacion.animConfeti) lanzarConfeti(); renderStudentContent(); }
+function toggleAnimParticulas(){ personalizacion.animParticulas = !personalizacion.animParticulas; guardarPersonalizacion(); aplicarPersonalizacion(); renderStudentContent(); }
+
+function renderStudentPersonalizar(){
+  const temaActual = personalizacion.tema;
+  const fondoActual = personalizacion.fondo;
+  const avatarActual = personalizacion.avatar;
+  return `
+    <div class="panel" style="background:linear-gradient(135deg,#fdf2f8,#eef2ff);border:1.5px solid #d946ef">
+      <h3 style="color:#a21caf;margin-bottom:.3rem">🎨 Personalizar mi aula</h3>
+      <p class="sub" style="margin:0">Ponle tu estilo — solo tú ves estos cambios, nadie más se afecta.</p>
+    </div>
+
+    <div class="panel">
+      <h3>🖌️ Tema de color</h3>
+      <div class="pers-grid">
+        ${Object.keys(TEMAS_COLOR).map(id=>{
+          const t = TEMAS_COLOR[id];
+          return `<div class="tema-swatch ${temaActual===id?'selected':''}" onclick="elegirTema('${id}')">
+            <div class="tema-swatch-dot" style="background:linear-gradient(135deg,${t.accent},${t.accent2})"></div>
+            <div style="font-size:.74rem;font-weight:600">${t.emoji} ${t.nombre}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>🖼️ Fondo de pantalla (emojis)</h3>
+      <p class="sub" style="margin-top:-.4rem">Como el fondo de chat de WhatsApp, pero con tus emojis favoritos.</p>
+      <div class="pers-grid">
+        ${Object.keys(FONDOS_EMOJI).map(id=>{
+          const f = FONDOS_EMOJI[id];
+          const preview = f.emojis ? f.emojis.join(' ') : '🚫';
+          return `<div class="fondo-swatch ${fondoActual===id?'selected':''}" onclick="elegirFondo('${id}')">
+            <div class="fondo-swatch-preview">${preview}</div>
+            <div style="font-size:.74rem;font-weight:600">${f.nombre}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>🙂 Tu avatar</h3>
+      <p class="sub" style="margin-top:-.4rem">Aparece junto a tu nombre arriba.</p>
+      <div class="avatar-grid">
+        ${AVATARES_ALUMNO.map(e=>`<div class="avatar-opt ${avatarActual===e?'selected':''}" onclick="elegirAvatar('${e}')">${e}</div>`).join('')}
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>✨ Animaciones</h3>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:.7rem 0;border-bottom:1px solid var(--line)">
+        <div><strong style="font-size:.9rem">🎉 Confeti al entrar</strong><div class="sub" style="margin:0">Una lluvia de confeti cada vez que abres tu aula.</div></div>
+        <label class="ia-toggle" style="position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0">
+          <input type="checkbox" ${personalizacion.animConfeti?'checked':''} onchange="toggleAnimConfeti()" style="opacity:0;width:0;height:0">
+          <span style="position:absolute;inset:0;background:${personalizacion.animConfeti?'var(--green)':'#ccc'};border-radius:24px;transition:.2s;cursor:pointer" onclick="toggleAnimConfeti()"></span>
+          <span style="position:absolute;top:3px;left:${personalizacion.animConfeti?'23px':'3px'};width:18px;height:18px;background:white;border-radius:50%;transition:.2s;pointer-events:none"></span>
+        </label>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;padding:.7rem 0">
+        <div><strong style="font-size:.9rem">💫 Partículas flotando</strong><div class="sub" style="margin:0">Emojis subiendo lentamente por la pantalla todo el tiempo.</div></div>
+        <label class="ia-toggle" style="position:relative;display:inline-block;width:44px;height:24px;flex-shrink:0">
+          <input type="checkbox" ${personalizacion.animParticulas?'checked':''} onchange="toggleAnimParticulas()" style="opacity:0;width:0;height:0">
+          <span style="position:absolute;inset:0;background:${personalizacion.animParticulas?'var(--green)':'#ccc'};border-radius:24px;transition:.2s;cursor:pointer" onclick="toggleAnimParticulas()"></span>
+          <span style="position:absolute;top:3px;left:${personalizacion.animParticulas?'23px':'3px'};width:18px;height:18px;background:white;border-radius:50%;transition:.2s;pointer-events:none"></span>
+        </label>
+      </div>
+    </div>
+  `;
+}
+
 function logout(){
+  detenerParticulasFlotantes();
+  document.documentElement.style.removeProperty('--accent');
+  document.documentElement.style.removeProperty('--accent2');
+  const bg = document.getElementById('emojiBgLayer'); if(bg) bg.style.display = 'none';
+  const av = document.getElementById('userAvatar'); if(av) av.textContent = '';
   session = null;
   document.body.classList.remove('parent-mode');
   document.getElementById('app').classList.add('hidden');
@@ -1180,6 +1424,10 @@ function showApp(){
   document.getElementById('app').classList.remove('hidden');
   document.body.classList.toggle('parent-mode', session.role==='parent');
   document.getElementById('userLabel').textContent = session.label;
+  if(session.role==='student'){
+    cargarPersonalizacion();
+    if(personalizacion.animConfeti) setTimeout(lanzarConfeti, 400);
+  }
   if(session.role==='teacher'){
     document.getElementById('brandIcon').textContent = '👨‍🏫';
     document.getElementById('brandText').textContent = 'Panel del Maestro';
@@ -3630,7 +3878,8 @@ function renderStudentTabs(){
     {id:'activities', label:'📌 Tareas'},
     {id:'exams', label:'📝 Exámenes'},
     {id:'rubrica', label:'📊 Rúbrica'},
-    {id:'aprendizaje', label:'✍️ ¿Qué estoy aprendiendo?'}
+    {id:'aprendizaje', label:'✍️ ¿Qué estoy aprendiendo?'},
+    {id:'personalizar', label:'🎨 Personalizar'}
   ];
   document.getElementById('tabs').innerHTML = tabs.map(t=>`<button class="tab ${studentTab===t.id?'active':''}" onclick="setStudentTab('${t.id}')">${t.label}</button>`).join('');
   renderStudentContent();
@@ -3729,6 +3978,8 @@ function renderStudentContent(){
     c.innerHTML = renderStudentRubrica();
   } else if(studentTab==='aprendizaje'){
     c.innerHTML = renderStudentAprendizaje();
+  } else if(studentTab==='personalizar'){
+    c.innerHTML = renderStudentPersonalizar();
   }
 }
 
