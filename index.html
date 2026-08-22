@@ -110,7 +110,7 @@ input,select,textarea{font-family:inherit;font-size:14px}
 .empty p{font-size:.95rem}
 
 /* ── CHAT ─────────────────────────────── */
-.chat-wrap{display:grid;grid-template-columns:1fr 220px;gap:1.2rem;align-items:start}
+.chat-wrap{display:grid;grid-template-columns:260px 1fr;gap:1.2rem;align-items:start}
 @media (max-width:760px){.chat-wrap{grid-template-columns:1fr}}
 .chat-box{background:var(--card);border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,.05);display:flex;flex-direction:column;height:min(560px,70vh);overflow:hidden}
 .chat-head{padding:1rem 1.2rem;border-bottom:1.5px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:.6rem;flex-wrap:wrap}
@@ -130,12 +130,15 @@ input,select,textarea{font-family:inherit;font-size:14px}
 .chat-input-row button:hover{background:#0f4680}
 .chat-online{background:var(--card);border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,.05);padding:1.1rem}
 .chat-online h4{font-size:.85rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2);margin-bottom:.8rem;display:flex;align-items:center;gap:.4rem}
-.chat-online-list{display:flex;flex-direction:column;gap:.5rem;max-height:420px;overflow-y:auto}
-.chat-online-item{display:flex;align-items:center;gap:.5rem;font-size:.85rem;padding:5px 0}
+.chat-online-list{display:flex;flex-direction:column;gap:.2rem;max-height:420px;overflow-y:auto}
+.chat-online-item{display:flex;align-items:center;gap:.5rem;font-size:.85rem;padding:7px 8px;border-radius:8px}
 .chat-online-item .cdot{width:8px;height:8px;border-radius:50%;background:#4ade80;box-shadow:0 0 5px #4ade80;flex-shrink:0}
 .chat-online-item.is-teacher{font-weight:700;color:var(--accent)}
+.chat-online-item.selectable{cursor:pointer;transition:background .15s}
+.chat-online-item.selectable:hover{background:var(--soft)}
+.chat-online-item.active{background:#e0ecff}
 .chat-empty{text-align:center;color:var(--muted);font-size:.85rem;padding:2rem 1rem}
-.chat-room-select{padding:8px 12px;border:1.5px solid var(--line);border-radius:9px;background:var(--soft);font-family:inherit;font-size:.85rem;outline:none}
+.chat-room-select{padding:8px 12px;border:1.5px solid var(--line);border-radius:9px;background:var(--soft);font-family:inherit;font-size:.85rem;outline:none;width:100%;margin-bottom:.8rem}
 
 /* ── TOAST ─────────────────────────────── */
 .toast{position:fixed;top:20px;right:20px;background:var(--ink);color:#fff;padding:13px 20px;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.2);z-index:9999;animation:slidein .3s ease-out;font-size:.9rem;max-width:320px}
@@ -747,9 +750,11 @@ const firebaseConfig = {
 let fbApp=null, fbDb=null, fbConnected=false, fbReady=false;
 
 /* ── CHAT: estado global ─────────────────────────────── */
-const chatClientId = 'c_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
-let currentChatRoomId=null, chatMyPresRef=null, chatMsgsListenerRef=null, chatPresListenerRef=null;
-let chatMessages=[], chatPresence={}, teacherChatRoom=null;
+let currentChatRoomId=null, chatMyPresRef=null, chatPresListenerRef=null, chatDmListenerRef=null;
+let chatMyPersonId=null;
+let chatPresence={}, chatMessages=[];
+let chatActivePartnerId=null, chatActivePartnerLabel=null, chatActivePartnerRole=null;
+let teacherChatRoom=null;
 let syncTimer=null, suppressSync=false;
 
 function setConnState(state, label){
@@ -855,13 +860,18 @@ function initFirebase(){
 
 /* ═══════════════════════════════════════════
    💬 CHAT EN VIVO
-   Un "salón" por grado+grupo (ej. "1_A"). Cada quien ve solo el chat
-   de su propio salón (+ el maestro, que elige a cuál entrar). La
-   presencia y los mensajes usan onDisconnect(), así que se borran
-   automáticamente en cuanto CUALQUIER conectado cierra sesión o
-   pierde conexión — el chat siempre arranca limpio.
+   Un "salón" por CLASE (nombre del grupo del Registro, sin el sufijo de
+   trimestre) — así las clases combinadas como "1° ABC" quedan juntas en
+   un solo salón, aunque sean A/B/C real por separado. Dentro del salón
+   se ve quién está conectado y se elige con quién chatear (conversación
+   privada 1 a 1). Presencia y conversaciones usan onDisconnect(), así
+   que en cuanto CUALQUIER conectado del salón cierra sesión o pierde
+   conexión, se borran TODAS las conversaciones de esa clase — el chat
+   nunca guarda historial.
 ═══════════════════════════════════════════ */
-function _chatRoomId(grado, grupo){ return String(grado)+'_'+String(grupo||'').toUpperCase(); }
+function _fbSafeKey(s){ return String(s).replace(/[.#$\[\]\/]/g,'_'); }
+function _pairKey(a,b){ return [_fbSafeKey(a),_fbSafeKey(b)].sort().join('__'); }
+function escJs(s){ return String(s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'"); }
 
 function _chatVisibleNow(){
   return !!(session && (
@@ -870,26 +880,44 @@ function _chatVisibleNow(){
   ));
 }
 
-function joinChatRoom(roomId, displayName, role){
-  if(!fbReady || !roomId) return;
+// Nombre de "clase" = nombre del grupo de calificaciones sin el sufijo de
+// trimestre (ej. "Informática 1° ABC · Trim 2" → "Informática 1° ABC").
+// Es el mismo criterio que ya usa renderParentSummary para agrupar.
+function _classKeyForGroupName(name){ return String(name||'').replace(/\s*·\s*Trim.*$/,'').trim(); }
+
+function _distinctClassesPortal(){
+  const seen = new Set(); const out=[];
+  (portal.calif && portal.calif.groups ? portal.calif.groups : []).forEach(g=>{
+    const key = _classKeyForGroupName(g.name);
+    if(key && !seen.has(key)){ seen.add(key); out.push({key}); }
+  });
+  out.sort((a,b)=>a.key.localeCompare(b.key));
+  return out;
+}
+
+function _classKeyForStudent(studentId){
+  if(!portal.calif || !portal.calif.groups || !studentId) return null;
+  for(const g of portal.calif.groups){
+    if((g.students||[]).some(s=>s.id===studentId)) return _classKeyForGroupName(g.name);
+  }
+  return null;
+}
+
+function joinChatRoom(roomId, displayName, role, personId){
+  if(!fbReady || !roomId || !personId) return;
   if(currentChatRoomId === roomId && chatMyPresRef) return; // ya conectado a este salón
   if(currentChatRoomId) leaveChatRoom(false);
   currentChatRoomId = roomId;
+  chatMyPersonId = _fbSafeKey(personId);
   const roomRef = fbDb.ref('portal/chat/rooms/'+roomId);
 
-  chatMyPresRef = roomRef.child('presence').push();
+  chatMyPresRef = roomRef.child('presence/'+chatMyPersonId);
   chatMyPresRef.set({ name: displayName, role: role, ts: firebase.database.ServerValue.TIMESTAMP });
   chatMyPresRef.onDisconnect().remove();
-  // Al perder conexión (cerrar pestaña, cerrar sesión, etc.) se borra
-  // TODO el chat del salón — así el chat nunca guarda historial.
-  roomRef.child('messages').onDisconnect().remove();
+  // Al perder conexión (cerrar pestaña, cerrar sesión, etc.) se borran
+  // TODAS las conversaciones privadas de esta clase — nunca guarda historial.
+  roomRef.child('dms').onDisconnect().remove();
 
-  chatMsgsListenerRef = roomRef.child('messages');
-  chatMsgsListenerRef.on('value', snap=>{
-    const v = snap.val()||{};
-    chatMessages = Object.keys(v).map(k=>({id:k,...v[k]})).sort((a,b)=>(a.ts||0)-(b.ts||0));
-    if(_chatVisibleNow()) renderChatMessagesUI();
-  });
   chatPresListenerRef = roomRef.child('presence');
   chatPresListenerRef.on('value', snap=>{
     chatPresence = snap.val()||{};
@@ -900,30 +928,49 @@ function joinChatRoom(roomId, displayName, role){
 function leaveChatRoom(wipe){
   if(!currentChatRoomId || !fbReady){ currentChatRoomId=null; return; }
   const roomRef = fbDb.ref('portal/chat/rooms/'+currentChatRoomId);
-  if(chatMsgsListenerRef) chatMsgsListenerRef.off();
   if(chatPresListenerRef) chatPresListenerRef.off();
+  if(chatDmListenerRef) chatDmListenerRef.off();
   if(chatMyPresRef){
     chatMyPresRef.onDisconnect().cancel();
     chatMyPresRef.remove().catch(()=>{});
   }
-  roomRef.child('messages').onDisconnect().cancel();
+  roomRef.child('dms').onDisconnect().cancel();
   if(wipe){
-    roomRef.child('messages').remove().catch(()=>{});
+    roomRef.child('dms').remove().catch(()=>{});
     roomRef.child('presence').remove().catch(()=>{});
   }
-  currentChatRoomId=null; chatMyPresRef=null; chatMsgsListenerRef=null; chatPresListenerRef=null;
-  chatMessages=[]; chatPresence={};
+  currentChatRoomId=null; chatMyPresRef=null; chatPresListenerRef=null; chatDmListenerRef=null;
+  chatMyPersonId=null; chatPresence={}; chatMessages=[];
+  chatActivePartnerId=null; chatActivePartnerLabel=null; chatActivePartnerRole=null;
+}
+
+function selectChatPartner(partnerId, partnerLabel, partnerRole){
+  if(!currentChatRoomId || !chatMyPersonId) return;
+  const pid = _fbSafeKey(partnerId);
+  if(pid === chatMyPersonId) return;
+  if(chatDmListenerRef) chatDmListenerRef.off();
+  chatActivePartnerId = pid; chatActivePartnerLabel = partnerLabel; chatActivePartnerRole = partnerRole;
+  chatMessages = [];
+  const pairKey = _pairKey(chatMyPersonId, pid);
+  chatDmListenerRef = fbDb.ref('portal/chat/rooms/'+currentChatRoomId+'/dms/'+pairKey+'/messages');
+  chatDmListenerRef.on('value', snap=>{
+    const v = snap.val()||{};
+    chatMessages = Object.keys(v).map(k=>({id:k,...v[k]})).sort((a,b)=>(a.ts||0)-(b.ts||0));
+    if(_chatVisibleNow()) renderChatMessagesUI();
+  });
+  if(session.role==='student') renderStudentContent();
+  else renderTeacherContent();
 }
 
 function sendChatMessage(){
   const input = document.getElementById('chatInput');
   if(!input || !session) return;
   const text = input.value.trim();
-  if(!text || !currentChatRoomId){ return; }
+  if(!text || !currentChatRoomId || !chatActivePartnerId) return;
   if(!fbReady || !fbConnected){ toast('Sin conexión — no se pudo enviar','error'); return; }
-  const roomRef = fbDb.ref('portal/chat/rooms/'+currentChatRoomId);
-  roomRef.child('messages').push({
-    senderId: chatClientId,
+  const pairKey = _pairKey(chatMyPersonId, chatActivePartnerId);
+  fbDb.ref('portal/chat/rooms/'+currentChatRoomId+'/dms/'+pairKey+'/messages').push({
+    senderId: chatMyPersonId,
     name: session.role==='teacher' ? 'Maestro' : session.label,
     role: session.role,
     text: text.slice(0,500),
@@ -933,22 +980,32 @@ function sendChatMessage(){
   input.focus();
 }
 
+function renderChatOnlinePicker(){
+  const entries = Object.entries(chatPresence||{}).filter(([pid])=>pid!==chatMyPersonId);
+  if(!entries.length) return '<div class="chat-empty" style="padding:.5rem 0">Nadie más conectado por ahora</div>';
+  entries.sort((a,b)=> (a[1].role==='teacher'?-1:0) - (b[1].role==='teacher'?-1:0) || String(a[1].name||'').localeCompare(String(b[1].name||'')));
+  return entries.map(([pid,p])=>{
+    const active = pid===chatActivePartnerId;
+    return `<div class="chat-online-item selectable ${p.role==='teacher'?'is-teacher':''} ${active?'active':''}" onclick="selectChatPartner('${escJs(pid)}','${escJs(p.name)}','${escJs(p.role)}')"><span class="cdot"></span>${p.role==='teacher'?'👨‍🏫 ':'🎒 '}${escHtml(p.name||'')}</div>`;
+  }).join('');
+}
+
 function renderChatView(roomLabel, pickerHtml){
+  const hasPartner = !!chatActivePartnerId;
   return `<div class="chat-wrap">
+    <div class="chat-online">
+      <h4>🟢 Conectados — ${escHtml(roomLabel)}</h4>
+      ${pickerHtml||''}
+      <div class="chat-online-list" id="chatOnlineList"></div>
+    </div>
     <div class="chat-box">
-      <div class="chat-head">
-        <h3>💬 Chat — ${escHtml(roomLabel)}</h3>
-        ${pickerHtml||''}
-      </div>
+      ${hasPartner ? `
+      <div class="chat-head"><h3>💬 ${chatActivePartnerRole==='teacher'?'👨‍🏫 ':'🎒 '}${escHtml(chatActivePartnerLabel||'')}</h3></div>
       <div class="chat-msgs" id="chatMsgs"></div>
       <div class="chat-input-row">
         <input type="text" id="chatInput" placeholder="Escribe un mensaje…" maxlength="500" onkeydown="if(event.key==='Enter'){event.preventDefault();sendChatMessage();}">
         <button onclick="sendChatMessage()" title="Enviar">➤</button>
-      </div>
-    </div>
-    <div class="chat-online">
-      <h4>🟢 Conectados</h4>
-      <div class="chat-online-list" id="chatOnlineList"></div>
+      </div>` : `<div class="chat-empty" style="margin:auto">👈 Selecciona a alguien de la lista para empezar a chatear</div>`}
     </div>
   </div>`;
 }
@@ -960,7 +1017,7 @@ function renderChatMessagesUI(){
     return;
   }
   el.innerHTML = chatMessages.map(m=>{
-    const mine = m.senderId === chatClientId;
+    const mine = m.senderId === chatMyPersonId;
     const teacherCls = (m.role==='teacher' && !mine) ? ' teacher-msg' : '';
     const time = m.ts ? new Date(m.ts).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}) : '';
     return `<div class="chat-msg ${mine?'me':'other'}${teacherCls}">${mine?'':`<div class="cm-name">${m.role==='teacher'?'👨‍🏫 ':'🎒 '}${escHtml(m.name||'')}</div>`}<div>${escHtml(m.text||'')}</div><div class="cm-time">${time}</div></div>`;
@@ -970,27 +1027,12 @@ function renderChatMessagesUI(){
 
 function renderChatOnlineUI(){
   const el = document.getElementById('chatOnlineList'); if(!el) return;
-  const list = Object.values(chatPresence||{});
-  if(!list.length){ el.innerHTML = '<div class="chat-empty" style="padding:.5rem 0">Nadie más conectado</div>'; return; }
-  list.sort((a,b)=> (a.role==='teacher'?-1:0) - (b.role==='teacher'?-1:0) || String(a.name||'').localeCompare(String(b.name||'')));
-  el.innerHTML = list.map(p=>`<div class="chat-online-item ${p.role==='teacher'?'is-teacher':''}"><span class="cdot"></span>${p.role==='teacher'?'👨‍🏫 ':'🎒 '}${escHtml(p.name||'')}</div>`).join('');
-}
-
-// Grados/grupos distintos disponibles (para que el maestro elija a cuál entrar)
-function _distinctGruposPortal(){
-  const alumnos = getAlumnosDesdeCalif();
-  const seen = new Set(); const out=[];
-  alumnos.forEach(a=>{
-    if(!a.grado || !a.grupo) return;
-    const k=_chatRoomId(a.grado,a.grupo);
-    if(!seen.has(k)){ seen.add(k); out.push({id:k, grado:a.grado, grupo:a.grupo}); }
-  });
-  out.sort((x,y)=> String(x.grado).localeCompare(String(y.grado)) || String(x.grupo).localeCompare(String(y.grupo)));
-  return out;
+  el.innerHTML = renderChatOnlinePicker();
 }
 
 function changeTeacherChatRoom(id){
   teacherChatRoom = id;
+  chatActivePartnerId=null; chatActivePartnerLabel=null; chatActivePartnerRole=null;
   renderTeacherContent();
 }
 
@@ -1788,19 +1830,18 @@ function renderTeacherContent(){
 
 function renderTeacherChatTab(c){
   if(!fbReady){ c.innerHTML = `<div class="empty"><div class="big">💬</div><p>Esperando conexión con Firebase…</p></div>`; return; }
-  const grupos = _distinctGruposPortal();
-  if(!grupos.length){
-    c.innerHTML = `<div class="empty"><div class="big">💬</div><p>Importa datos de alumnos (con grado y grupo) para poder chatear con un grupo.</p></div>`;
+  const classes = _distinctClassesPortal();
+  if(!classes.length){
+    c.innerHTML = `<div class="empty"><div class="big">💬</div><p>Importa datos de alumnos para poder chatear con una clase.</p></div>`;
     return;
   }
-  if(!teacherChatRoom || !grupos.find(g=>g.id===teacherChatRoom)) teacherChatRoom = grupos[0].id;
-  const active = grupos.find(g=>g.id===teacherChatRoom);
-  joinChatRoom(teacherChatRoom, 'Maestro', 'teacher');
-  const opts = grupos.map(g=>`<option value="${g.id}" ${g.id===teacherChatRoom?'selected':''}>${gradoLabel(g.grado)} · Grupo ${escHtml(g.grupo)}</option>`).join('');
+  if(!teacherChatRoom || !classes.find(cl=>cl.key===teacherChatRoom)) teacherChatRoom = classes[0].key;
+  joinChatRoom(_fbSafeKey(teacherChatRoom), 'Maestro', 'teacher', 'maestro');
+  const opts = classes.map(cl=>`<option value="${escHtml(cl.key)}" ${cl.key===teacherChatRoom?'selected':''}>${escHtml(cl.key)}</option>`).join('');
   const picker = `<select class="chat-room-select" onchange="changeTeacherChatRoom(this.value)">${opts}</select>`;
-  c.innerHTML = renderChatView(`${gradoLabel(active.grado)} · Grupo ${active.grupo}`, picker);
-  renderChatMessagesUI();
+  c.innerHTML = renderChatView(teacherChatRoom, picker);
   renderChatOnlineUI();
+  renderChatMessagesUI();
 }
 
 // ── CALIFICACIONES: Import JSON from Registro ──
@@ -4237,16 +4278,17 @@ function matchesStudent(item){
 }
 
 function renderStudentChatTab(c){
-  if(!session.grado || !session.grupo){
-    c.innerHTML = `<div class="empty"><div class="big">💬</div><p>No tienes grado y grupo asignados todavía, así que no puedes entrar al chat. Pídele a tu maestro que lo revise.</p></div>`;
+  if(!fbReady){ c.innerHTML = `<div class="empty"><div class="big">💬</div><p>Esperando conexión con Firebase…</p></div>`; return; }
+  const classKey = _classKeyForStudent(session.studentId);
+  if(!classKey){
+    c.innerHTML = `<div class="empty"><div class="big">💬</div><p>No encontramos tu clase todavía, así que no puedes entrar al chat. Pídele a tu maestro que lo revise.</p></div>`;
     return;
   }
-  if(!fbReady){ c.innerHTML = `<div class="empty"><div class="big">💬</div><p>Esperando conexión con Firebase…</p></div>`; return; }
-  const roomId = _chatRoomId(session.grado, session.grupo);
-  joinChatRoom(roomId, session.label, 'student');
-  c.innerHTML = renderChatView(`${gradoLabel(session.grado)} · Grupo ${session.grupo}`);
-  renderChatMessagesUI();
+  const personId = session.studentId || session.code;
+  joinChatRoom(_fbSafeKey(classKey), session.label, 'student', personId);
+  c.innerHTML = renderChatView(classKey);
   renderChatOnlineUI();
+  renderChatMessagesUI();
 }
 
 function renderStudentContent(){
