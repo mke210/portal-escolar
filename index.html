@@ -462,6 +462,34 @@ body.parent-mode .tab.active{
 /* Brillito al tocar botones (si está activo) */
 .btn.sparkle-on:active{ animation:sparklePulse .25s ease; }
 @keyframes sparklePulse{ 0%{transform:scale(1);} 50%{transform:scale(.94);} 100%{transform:scale(1);} }
+
+/* Fondo animado tipo Matrix (canvas) */
+.matrix-bg-canvas{ position:fixed; inset:0; z-index:0; display:none; opacity:.4; }
+
+/* Transparencias: cuando hay un fondo activo (emoji o Matrix), las tarjetas
+   blancas se vuelven semitransparentes con un desenfoque suave detrás, para
+   que el fondo se alcance a ver a través de ellas sin perder legibilidad. */
+body.fondo-activo .panel,
+body.fondo-activo .item,
+body.fondo-activo .stat,
+body.fondo-activo .mat-card,
+body.fondo-activo .tree-grade,
+body.fondo-activo .tree-group,
+body.fondo-activo .tree-activity,
+body.fondo-activo .tree-activity>summary,
+body.fondo-activo .sub-table,
+body.fondo-activo .tree-empty,
+body.fondo-activo .grades-wrap,
+body.fondo-activo .exam-opt,
+body.fondo-activo .modal,
+body.fondo-activo .game-modal{
+  background:rgba(255,255,255,.78) !important;
+  backdrop-filter:blur(7px);
+  -webkit-backdrop-filter:blur(7px);
+}
+body.fondo-activo .item:hover{ background:rgba(255,255,255,.92) !important; }
+body.fondo-activo .tabs{ background:rgba(26,26,46,.85) !important; backdrop-filter:blur(7px); -webkit-backdrop-filter:blur(7px); }
+body.fondo-activo .topbar{ background:rgba(26,26,46,.9) !important; backdrop-filter:blur(7px); -webkit-backdrop-filter:blur(7px); }
 </style>
 </head>
 <body>
@@ -1245,6 +1273,11 @@ const FONDOS_EMOJI = {
   corazones: { nombre:'Corazones', emojis:['❤️','💜','💙','💛'] },
   comida:    { nombre:'Comida',    emojis:['🍕','🍔','🍟','🍩'] }
 };
+const FONDOS_MATRIX = {
+  matrix_verde:    { nombre:'Matrix Clásico',  colorMode:'verde',    bgColor:'#000' },
+  matrix_neon:     { nombre:'Matrix Neón',     colorMode:'neon',     bgColor:'#0a0014' },
+  matrix_arcoiris: { nombre:'Matrix Arcoíris', colorMode:'arcoiris', bgColor:'#000' }
+};
 const AVATARES_ALUMNO = ['🙂','😎','🤓','🥳','😺','🐶','🦊','🐼','🦁','🐨','🐯','🦄',
   '🐸','🐵','🤖','👽','🎮','⚽','🎸','🎨','🚀','⭐','🔥','🌈'];
 
@@ -1268,16 +1301,19 @@ function aplicarPersonalizacion(){
   document.documentElement.style.setProperty('--accent', tema.accent);
   document.documentElement.style.setProperty('--accent2', tema.accent2);
 
+  const fondoEmojiDef = FONDOS_EMOJI[personalizacion.fondo];
+  const fondoMatrixDef = FONDOS_MATRIX[personalizacion.fondo];
+
   let bg = document.getElementById('emojiBgLayer');
-  const fondoDef = FONDOS_EMOJI[personalizacion.fondo];
-  if(fondoDef && fondoDef.emojis){
+  if(fondoEmojiDef && fondoEmojiDef.emojis){
+    detenerFondoMatrix();
     if(!bg){
       bg = document.createElement('div');
       bg.id = 'emojiBgLayer';
       bg.className = 'emoji-bg';
       document.body.insertBefore(bg, document.body.firstChild);
     }
-    const emojis = fondoDef.emojis;
+    const emojis = fondoEmojiDef.emojis;
     let rows = '';
     for(let r=0; r<16; r++){
       let row = '';
@@ -1286,9 +1322,16 @@ function aplicarPersonalizacion(){
     }
     bg.innerHTML = rows;
     bg.style.display = 'block';
-  } else if(bg){
-    bg.style.display = 'none';
+  } else if(fondoMatrixDef){
+    if(bg) bg.style.display = 'none';
+    iniciarFondoMatrix(fondoMatrixDef);
+  } else {
+    if(bg) bg.style.display = 'none';
+    detenerFondoMatrix();
   }
+
+  document.body.classList.toggle('fondo-activo',
+    !!((fondoEmojiDef && fondoEmojiDef.emojis) || fondoMatrixDef) && session && session.role==='student');
 
   const av = document.getElementById('userAvatar');
   if(av) av.textContent = (session && session.role==='student') ? (personalizacion.avatar||'') : '';
@@ -1329,6 +1372,66 @@ function iniciarParticulasFlotantes(){
 }
 function detenerParticulasFlotantes(){
   if(_particulasInterval){ clearInterval(_particulasInterval); _particulasInterval = null; }
+}
+
+/* ── 🟢 Fondos animados tipo Matrix (lluvia de código en canvas) ── */
+let _matrixCanvas = null, _matrixCtx = null, _matrixInterval = null, _matrixCols = [];
+let _matrixResizeHandler = null;
+const MATRIX_CHARS = 'アイウエオカキクケコサシスセソタチツテト0123456789ABCDEFｱｲｳｴｵｶｷｸｹｺ';
+
+function _matrixColor(def, colIdx){
+  if(def.colorMode==='verde') return '#00ff41';
+  if(def.colorMode==='neon') return (colIdx%2===0) ? '#ff00e5' : '#00e5ff';
+  if(def.colorMode==='arcoiris'){
+    const hue = Math.floor((Date.now()/15 + colIdx*17) % 360);
+    return `hsl(${hue},100%,55%)`;
+  }
+  return '#00ff41';
+}
+
+function iniciarFondoMatrix(def){
+  detenerFondoMatrix();
+  _matrixCanvas = document.getElementById('matrixBgCanvas');
+  if(!_matrixCanvas){
+    _matrixCanvas = document.createElement('canvas');
+    _matrixCanvas.id = 'matrixBgCanvas';
+    _matrixCanvas.className = 'matrix-bg-canvas';
+    document.body.insertBefore(_matrixCanvas, document.body.firstChild);
+  }
+  const fontSize = 16;
+  const setup = ()=>{
+    _matrixCanvas.width = window.innerWidth;
+    _matrixCanvas.height = window.innerHeight;
+    const columns = Math.max(1, Math.floor(_matrixCanvas.width / fontSize));
+    _matrixCols = new Array(columns).fill(0).map(()=>Math.floor(Math.random()*30));
+  };
+  setup();
+  _matrixResizeHandler = ()=>setup();
+  window.addEventListener('resize', _matrixResizeHandler);
+  _matrixCanvas.style.display = 'block';
+  _matrixCanvas.style.background = def.bgColor;
+  _matrixCtx = _matrixCanvas.getContext('2d');
+
+  _matrixInterval = setInterval(()=>{
+    if(!_matrixCtx) return;
+    _matrixCtx.fillStyle = 'rgba(0,0,0,0.13)';
+    _matrixCtx.fillRect(0, 0, _matrixCanvas.width, _matrixCanvas.height);
+    _matrixCtx.font = fontSize + 'px monospace';
+    for(let i=0; i<_matrixCols.length; i++){
+      const ch = MATRIX_CHARS[Math.floor(Math.random()*MATRIX_CHARS.length)];
+      _matrixCtx.fillStyle = _matrixColor(def, i);
+      _matrixCtx.fillText(ch, i*fontSize, _matrixCols[i]*fontSize);
+      if(_matrixCols[i]*fontSize > _matrixCanvas.height && Math.random() > 0.975) _matrixCols[i] = 0;
+      _matrixCols[i]++;
+    }
+  }, 55);
+}
+
+function detenerFondoMatrix(){
+  if(_matrixInterval){ clearInterval(_matrixInterval); _matrixInterval = null; }
+  if(_matrixResizeHandler){ window.removeEventListener('resize', _matrixResizeHandler); _matrixResizeHandler = null; }
+  const c = document.getElementById('matrixBgCanvas'); if(c) c.style.display = 'none';
+  _matrixCtx = null;
 }
 
 function elegirTema(id){ personalizacion.tema = id; guardarPersonalizacion(); aplicarPersonalizacion(); renderStudentContent(); }
@@ -1376,6 +1479,21 @@ function renderStudentPersonalizar(){
     </div>
 
     <div class="panel">
+      <h3>🟢 Fondos animados (Matrix)</h3>
+      <p class="sub" style="margin-top:-.4rem">Lluvia de código en movimiento, como en la película. Elige uno o quítalo con "Ninguno" arriba.</p>
+      <div class="pers-grid">
+        ${Object.keys(FONDOS_MATRIX).map(id=>{
+          const f = FONDOS_MATRIX[id];
+          const dotColor = f.colorMode==='verde' ? '#00ff41' : f.colorMode==='neon' ? '#ff00e5' : 'conic-gradient(red,orange,yellow,green,blue,violet,red)';
+          return `<div class="fondo-swatch ${fondoActual===id?'selected':''}" onclick="elegirFondo('${id}')" style="background:#000">
+            <div style="font-size:1.1rem;font-family:monospace;color:${f.colorMode==='arcoiris'?'#fff':dotColor};letter-spacing:.2rem">アイウ</div>
+            <div style="font-size:.74rem;font-weight:600;color:#fff">${f.nombre}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+
+    <div class="panel">
       <h3>🙂 Tu avatar</h3>
       <p class="sub" style="margin-top:-.4rem">Aparece junto a tu nombre arriba.</p>
       <div class="avatar-grid">
@@ -1407,6 +1525,8 @@ function renderStudentPersonalizar(){
 
 function logout(){
   detenerParticulasFlotantes();
+  detenerFondoMatrix();
+  document.body.classList.remove('fondo-activo');
   document.documentElement.style.removeProperty('--accent');
   document.documentElement.style.removeProperty('--accent2');
   const bg = document.getElementById('emojiBgLayer'); if(bg) bg.style.display = 'none';
