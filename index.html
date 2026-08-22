@@ -109,6 +109,34 @@ input,select,textarea{font-family:inherit;font-size:14px}
 .empty .big{font-size:3rem;margin-bottom:.8rem}
 .empty p{font-size:.95rem}
 
+/* ── CHAT ─────────────────────────────── */
+.chat-wrap{display:grid;grid-template-columns:1fr 220px;gap:1.2rem;align-items:start}
+@media (max-width:760px){.chat-wrap{grid-template-columns:1fr}}
+.chat-box{background:var(--card);border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,.05);display:flex;flex-direction:column;height:min(560px,70vh);overflow:hidden}
+.chat-head{padding:1rem 1.2rem;border-bottom:1.5px solid var(--line);display:flex;align-items:center;justify-content:space-between;gap:.6rem;flex-wrap:wrap}
+.chat-head h3{margin:0}
+.chat-msgs{flex:1;overflow-y:auto;padding:1rem 1.2rem;display:flex;flex-direction:column;gap:.55rem;background:var(--soft)}
+.chat-msg{max-width:78%;padding:8px 12px;border-radius:14px;font-size:.87rem;line-height:1.35;position:relative;word-break:break-word;box-shadow:0 1px 3px rgba(0,0,0,.06)}
+.chat-msg.me{align-self:flex-end;background:var(--accent2);color:#fff;border-bottom-right-radius:4px}
+.chat-msg.other{align-self:flex-start;background:#fff;border:1.5px solid var(--line);border-bottom-left-radius:4px}
+.chat-msg.teacher-msg{border:1.5px solid var(--accent);background:#fff5f0}
+.chat-msg .cm-name{font-size:.72rem;font-weight:700;margin-bottom:2px;display:flex;align-items:center;gap:.3rem;opacity:.85}
+.chat-msg.me .cm-name{color:rgba(255,255,255,.85)}
+.chat-msg .cm-time{font-size:.65rem;opacity:.6;margin-top:2px;text-align:right}
+.chat-input-row{display:flex;gap:.6rem;padding:.8rem 1.2rem;border-top:1.5px solid var(--line);background:#fff}
+.chat-input-row input{flex:1;padding:10px 14px;border:1.5px solid var(--line);border-radius:20px;background:var(--soft);outline:none}
+.chat-input-row input:focus{border-color:var(--accent2)}
+.chat-input-row button{background:var(--accent2);color:#fff;width:40px;height:40px;border-radius:50%;font-size:1.1rem;flex-shrink:0;display:flex;align-items:center;justify-content:center;transition:background .2s}
+.chat-input-row button:hover{background:#0f4680}
+.chat-online{background:var(--card);border-radius:14px;box-shadow:0 2px 12px rgba(0,0,0,.05);padding:1.1rem}
+.chat-online h4{font-size:.85rem;text-transform:uppercase;letter-spacing:.04em;color:var(--ink2);margin-bottom:.8rem;display:flex;align-items:center;gap:.4rem}
+.chat-online-list{display:flex;flex-direction:column;gap:.5rem;max-height:420px;overflow-y:auto}
+.chat-online-item{display:flex;align-items:center;gap:.5rem;font-size:.85rem;padding:5px 0}
+.chat-online-item .cdot{width:8px;height:8px;border-radius:50%;background:#4ade80;box-shadow:0 0 5px #4ade80;flex-shrink:0}
+.chat-online-item.is-teacher{font-weight:700;color:var(--accent)}
+.chat-empty{text-align:center;color:var(--muted);font-size:.85rem;padding:2rem 1rem}
+.chat-room-select{padding:8px 12px;border:1.5px solid var(--line);border-radius:9px;background:var(--soft);font-family:inherit;font-size:.85rem;outline:none}
+
 /* ── TOAST ─────────────────────────────── */
 .toast{position:fixed;top:20px;right:20px;background:var(--ink);color:#fff;padding:13px 20px;border-radius:10px;box-shadow:0 6px 20px rgba(0,0,0,.2);z-index:9999;animation:slidein .3s ease-out;font-size:.9rem;max-width:320px}
 .toast.success{background:var(--green)}
@@ -717,6 +745,11 @@ const firebaseConfig = {
 };
 
 let fbApp=null, fbDb=null, fbConnected=false, fbReady=false;
+
+/* ── CHAT: estado global ─────────────────────────────── */
+const chatClientId = 'c_'+Date.now().toString(36)+Math.random().toString(36).slice(2,8);
+let currentChatRoomId=null, chatMyPresRef=null, chatMsgsListenerRef=null, chatPresListenerRef=null;
+let chatMessages=[], chatPresence={}, teacherChatRoom=null;
 let syncTimer=null, suppressSync=false;
 
 function setConnState(state, label){
@@ -818,6 +851,147 @@ function initFirebase(){
     console.error('No se pudo cargar Firebase SDK desde ningún CDN:', err);
     setConnState('offline','SDK no disponible (sin internet)');
   });
+}
+
+/* ═══════════════════════════════════════════
+   💬 CHAT EN VIVO
+   Un "salón" por grado+grupo (ej. "1_A"). Cada quien ve solo el chat
+   de su propio salón (+ el maestro, que elige a cuál entrar). La
+   presencia y los mensajes usan onDisconnect(), así que se borran
+   automáticamente en cuanto CUALQUIER conectado cierra sesión o
+   pierde conexión — el chat siempre arranca limpio.
+═══════════════════════════════════════════ */
+function _chatRoomId(grado, grupo){ return String(grado)+'_'+String(grupo||'').toUpperCase(); }
+
+function _chatVisibleNow(){
+  return !!(session && (
+    (session.role==='student' && studentTab==='chat') ||
+    (session.role==='teacher' && teacherTab==='chat')
+  ));
+}
+
+function joinChatRoom(roomId, displayName, role){
+  if(!fbReady || !roomId) return;
+  if(currentChatRoomId === roomId && chatMyPresRef) return; // ya conectado a este salón
+  if(currentChatRoomId) leaveChatRoom(false);
+  currentChatRoomId = roomId;
+  const roomRef = fbDb.ref('portal/chat/rooms/'+roomId);
+
+  chatMyPresRef = roomRef.child('presence').push();
+  chatMyPresRef.set({ name: displayName, role: role, ts: firebase.database.ServerValue.TIMESTAMP });
+  chatMyPresRef.onDisconnect().remove();
+  // Al perder conexión (cerrar pestaña, cerrar sesión, etc.) se borra
+  // TODO el chat del salón — así el chat nunca guarda historial.
+  roomRef.child('messages').onDisconnect().remove();
+
+  chatMsgsListenerRef = roomRef.child('messages');
+  chatMsgsListenerRef.on('value', snap=>{
+    const v = snap.val()||{};
+    chatMessages = Object.keys(v).map(k=>({id:k,...v[k]})).sort((a,b)=>(a.ts||0)-(b.ts||0));
+    if(_chatVisibleNow()) renderChatMessagesUI();
+  });
+  chatPresListenerRef = roomRef.child('presence');
+  chatPresListenerRef.on('value', snap=>{
+    chatPresence = snap.val()||{};
+    if(_chatVisibleNow()) renderChatOnlineUI();
+  });
+}
+
+function leaveChatRoom(wipe){
+  if(!currentChatRoomId || !fbReady){ currentChatRoomId=null; return; }
+  const roomRef = fbDb.ref('portal/chat/rooms/'+currentChatRoomId);
+  if(chatMsgsListenerRef) chatMsgsListenerRef.off();
+  if(chatPresListenerRef) chatPresListenerRef.off();
+  if(chatMyPresRef){
+    chatMyPresRef.onDisconnect().cancel();
+    chatMyPresRef.remove().catch(()=>{});
+  }
+  roomRef.child('messages').onDisconnect().cancel();
+  if(wipe){
+    roomRef.child('messages').remove().catch(()=>{});
+    roomRef.child('presence').remove().catch(()=>{});
+  }
+  currentChatRoomId=null; chatMyPresRef=null; chatMsgsListenerRef=null; chatPresListenerRef=null;
+  chatMessages=[]; chatPresence={};
+}
+
+function sendChatMessage(){
+  const input = document.getElementById('chatInput');
+  if(!input || !session) return;
+  const text = input.value.trim();
+  if(!text || !currentChatRoomId){ return; }
+  if(!fbReady || !fbConnected){ toast('Sin conexión — no se pudo enviar','error'); return; }
+  const roomRef = fbDb.ref('portal/chat/rooms/'+currentChatRoomId);
+  roomRef.child('messages').push({
+    senderId: chatClientId,
+    name: session.role==='teacher' ? 'Maestro' : session.label,
+    role: session.role,
+    text: text.slice(0,500),
+    ts: firebase.database.ServerValue.TIMESTAMP
+  }).catch(()=> toast('No se pudo enviar el mensaje','error'));
+  input.value='';
+  input.focus();
+}
+
+function renderChatView(roomLabel, pickerHtml){
+  return `<div class="chat-wrap">
+    <div class="chat-box">
+      <div class="chat-head">
+        <h3>💬 Chat — ${escHtml(roomLabel)}</h3>
+        ${pickerHtml||''}
+      </div>
+      <div class="chat-msgs" id="chatMsgs"></div>
+      <div class="chat-input-row">
+        <input type="text" id="chatInput" placeholder="Escribe un mensaje…" maxlength="500" onkeydown="if(event.key==='Enter'){event.preventDefault();sendChatMessage();}">
+        <button onclick="sendChatMessage()" title="Enviar">➤</button>
+      </div>
+    </div>
+    <div class="chat-online">
+      <h4>🟢 Conectados</h4>
+      <div class="chat-online-list" id="chatOnlineList"></div>
+    </div>
+  </div>`;
+}
+
+function renderChatMessagesUI(){
+  const el = document.getElementById('chatMsgs'); if(!el) return;
+  if(!chatMessages.length){
+    el.innerHTML = '<div class="chat-empty">Aún no hay mensajes. ¡Sé el primero en saludar! 👋</div>';
+    return;
+  }
+  el.innerHTML = chatMessages.map(m=>{
+    const mine = m.senderId === chatClientId;
+    const teacherCls = (m.role==='teacher' && !mine) ? ' teacher-msg' : '';
+    const time = m.ts ? new Date(m.ts).toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'}) : '';
+    return `<div class="chat-msg ${mine?'me':'other'}${teacherCls}">${mine?'':`<div class="cm-name">${m.role==='teacher'?'👨‍🏫 ':'🎒 '}${escHtml(m.name||'')}</div>`}<div>${escHtml(m.text||'')}</div><div class="cm-time">${time}</div></div>`;
+  }).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function renderChatOnlineUI(){
+  const el = document.getElementById('chatOnlineList'); if(!el) return;
+  const list = Object.values(chatPresence||{});
+  if(!list.length){ el.innerHTML = '<div class="chat-empty" style="padding:.5rem 0">Nadie más conectado</div>'; return; }
+  list.sort((a,b)=> (a.role==='teacher'?-1:0) - (b.role==='teacher'?-1:0) || String(a.name||'').localeCompare(String(b.name||'')));
+  el.innerHTML = list.map(p=>`<div class="chat-online-item ${p.role==='teacher'?'is-teacher':''}"><span class="cdot"></span>${p.role==='teacher'?'👨‍🏫 ':'🎒 '}${escHtml(p.name||'')}</div>`).join('');
+}
+
+// Grados/grupos distintos disponibles (para que el maestro elija a cuál entrar)
+function _distinctGruposPortal(){
+  const alumnos = getAlumnosDesdeCalif();
+  const seen = new Set(); const out=[];
+  alumnos.forEach(a=>{
+    if(!a.grado || !a.grupo) return;
+    const k=_chatRoomId(a.grado,a.grupo);
+    if(!seen.has(k)){ seen.add(k); out.push({id:k, grado:a.grado, grupo:a.grupo}); }
+  });
+  out.sort((x,y)=> String(x.grado).localeCompare(String(y.grado)) || String(x.grupo).localeCompare(String(y.grupo)));
+  return out;
+}
+
+function changeTeacherChatRoom(id){
+  teacherChatRoom = id;
+  renderTeacherContent();
 }
 
 function subscribeFirebase(){
@@ -1524,6 +1698,7 @@ function renderStudentPersonalizar(){
 }
 
 function logout(){
+  leaveChatRoom(true); // borra todo el chat del salón al cerrar sesión
   detenerParticulasFlotantes();
   detenerFondoMatrix();
   document.body.classList.remove('fondo-activo');
@@ -1588,13 +1763,18 @@ function renderTeacherTabs(){
     {id:'materials', label:'📁 Materiales'},
     {id:'activities', label:'📌 Actividades'},
     {id:'rubricas', label:'🎯 Rúbricas y Aprendizajes'},
+    {id:'chat', label:'💬 Chat'},
     {id:'io', label:'💾 Importar / Exportar'}
   ];
   const tabsEl = document.getElementById('tabs');
   tabsEl.innerHTML = tabs.map(t=>`<button class="tab ${teacherTab===t.id?'active':''}" onclick="setTeacherTab('${t.id}')">${t.label}</button>`).join('');
   renderTeacherContent();
 }
-function setTeacherTab(id){ teacherTab=id; renderTeacherTabs(); }
+function setTeacherTab(id){
+  if(teacherTab==='chat' && id!=='chat') leaveChatRoom(false);
+  teacherTab=id;
+  renderTeacherTabs();
+}
 
 function renderTeacherContent(){
   const c = document.getElementById('content');
@@ -1602,7 +1782,25 @@ function renderTeacherContent(){
   else if(teacherTab==='materials') c.innerHTML = viewMaterials();
   else if(teacherTab==='activities') c.innerHTML = viewActividadesHub();
   else if(teacherTab==='rubricas') c.innerHTML = viewRubricas();
+  else if(teacherTab==='chat') renderTeacherChatTab(c);
   else if(teacherTab==='io') c.innerHTML = viewIO();
+}
+
+function renderTeacherChatTab(c){
+  if(!fbReady){ c.innerHTML = `<div class="empty"><div class="big">💬</div><p>Esperando conexión con Firebase…</p></div>`; return; }
+  const grupos = _distinctGruposPortal();
+  if(!grupos.length){
+    c.innerHTML = `<div class="empty"><div class="big">💬</div><p>Importa datos de alumnos (con grado y grupo) para poder chatear con un grupo.</p></div>`;
+    return;
+  }
+  if(!teacherChatRoom || !grupos.find(g=>g.id===teacherChatRoom)) teacherChatRoom = grupos[0].id;
+  const active = grupos.find(g=>g.id===teacherChatRoom);
+  joinChatRoom(teacherChatRoom, 'Maestro', 'teacher');
+  const opts = grupos.map(g=>`<option value="${g.id}" ${g.id===teacherChatRoom?'selected':''}>${gradoLabel(g.grado)} · Grupo ${escHtml(g.grupo)}</option>`).join('');
+  const picker = `<select class="chat-room-select" onchange="changeTeacherChatRoom(this.value)">${opts}</select>`;
+  c.innerHTML = renderChatView(`${gradoLabel(active.grado)} · Grupo ${active.grupo}`, picker);
+  renderChatMessagesUI();
+  renderChatOnlineUI();
 }
 
 // ── CALIFICACIONES: Import JSON from Registro ──
@@ -3999,6 +4197,7 @@ function renderStudentTabs(){
     {id:'exams', label:'📝 Exámenes'},
     {id:'rubrica', label:'📊 Rúbrica'},
     {id:'aprendizaje', label:'✍️ ¿Qué estoy aprendiendo?'},
+    {id:'chat', label:'💬 Chat'},
     {id:'personalizar', label:'🎨 Personalizar'}
   ];
   document.getElementById('tabs').innerHTML = tabs.map(t=>`<button class="tab ${studentTab===t.id?'active':''}" onclick="setStudentTab('${t.id}')">${t.label}</button>`).join('');
@@ -4016,6 +4215,7 @@ function setStudentTab(id){
     currentExam = null;
     examAnswers = [];
   }
+  if(studentTab==='chat' && id!=='chat') leaveChatRoom(false);
   studentTab=id;
   renderStudentTabs();
 }
@@ -4036,8 +4236,22 @@ function matchesStudent(item){
   return gradoOk && grupoOk;
 }
 
+function renderStudentChatTab(c){
+  if(!session.grado || !session.grupo){
+    c.innerHTML = `<div class="empty"><div class="big">💬</div><p>No tienes grado y grupo asignados todavía, así que no puedes entrar al chat. Pídele a tu maestro que lo revise.</p></div>`;
+    return;
+  }
+  if(!fbReady){ c.innerHTML = `<div class="empty"><div class="big">💬</div><p>Esperando conexión con Firebase…</p></div>`; return; }
+  const roomId = _chatRoomId(session.grado, session.grupo);
+  joinChatRoom(roomId, session.label, 'student');
+  c.innerHTML = renderChatView(`${gradoLabel(session.grado)} · Grupo ${session.grupo}`);
+  renderChatMessagesUI();
+  renderChatOnlineUI();
+}
+
 function renderStudentContent(){
   const c = document.getElementById('content');
+  if(studentTab==='chat'){ renderStudentChatTab(c); return; }
   if(studentTab==='grades'){
     const groups = getStudentGroups();
     if(!groups.length){
