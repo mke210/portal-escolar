@@ -2505,16 +2505,21 @@ function _getDiagnosticoExam(){
   return (portal.exams||[]).find(e=>e.esDiagnostico===true);
 }
 
+let diagGradoDestino = '1'; // grado al que se aplicará el examen (se puede cambiar antes de cargar)
+function setDiagGradoDestino(g){ diagGradoDestino = g; renderTeacherContent(); }
+
 function cargarExamenDiagnostico(){
   const data = DIAGNOSTICO_INFORMATICA_1RO;
   const existente = _getDiagnosticoExam();
   const questions = data.questions.map(q=>({ q: q.q, opts: q.opts.slice(), correct: q.correct, bloque: q.bloque }));
+  // Respeta el grado ya asignado al examen si existe; si no, usa el elegido en el selector.
+  const gradoAplicar = existente ? existente.grado : diagGradoDestino;
   if(existente){
     existente.title = data.title;
     existente.desc = data.desc;
     existente.bloques = data.bloques.slice();
     existente.questions = questions;
-    existente.grado = '1';
+    existente.grado = gradoAplicar;
     existente.grupo = 'all';
     existente.visible = true;
     existente.updatedAt = new Date().toISOString();
@@ -2522,13 +2527,23 @@ function cargarExamenDiagnostico(){
   } else {
     portal.exams.push({
       id: uid(), title: data.title, desc: data.desc,
-      grado: '1', grupo: 'all', esDiagnostico: true, bloques: data.bloques.slice(),
+      grado: gradoAplicar, grupo: 'all', esDiagnostico: true, bloques: data.bloques.slice(),
       questions, createdAt: new Date().toISOString(), visible: true
     });
-    toast('✓ Examen de Diagnóstico cargado — ya está disponible para 1er grado','success');
+    toast(`✓ Examen de Diagnóstico cargado — disponible para ${gradoAplicar==='all'?'todos los grados':gradoLabel(gradoAplicar)}`,'success');
   }
   saveStore();
   renderTeacherContent();
+}
+
+function cambiarGradoDiagnostico(nuevoGrado){
+  const e = _getDiagnosticoExam();
+  if(!e) return;
+  e.grado = nuevoGrado;
+  e.updatedAt = new Date().toISOString();
+  saveStore();
+  renderTeacherContent();
+  toast(`✓ Ahora se aplica a: ${nuevoGrado==='all'?'Todos los grados':gradoLabel(nuevoGrado)}`,'success');
 }
 
 function eliminarExamenDiagnostico(){
@@ -2546,26 +2561,46 @@ function setDiagGrupoFiltro(v){ diagGrupoFiltro = v; renderTeacherContent(); }
 
 function viewDiagnosticoSubfolder(){
   const exam = _getDiagnosticoExam();
+  const gradoLbl = (g)=> g==='all' ? 'Todos los grados' : gradoLabel(g);
+
   let html = `<div class="panel" style="background:linear-gradient(135deg,#eef2ff,#e0e7ff);border:1.5px solid #6366f1">
-    <h3 style="color:#3730a3;margin-bottom:.3rem">🩺 Examen de Diagnóstico — Informática (1er Grado)</h3>
+    <h3 style="color:#3730a3;margin-bottom:.3rem">🩺 Examen de Diagnóstico — Informática</h3>
     <p class="sub" style="margin:0">Evaluación de 50 preguntas, organizada en 7 bloques temáticos, para saber con qué conocimientos previos llegan tus alumnos de nuevo ingreso.</p>
   </div>`;
 
   if(!exam || !exam.visible){
     html += `<div class="panel">
       <p class="sub" style="margin-bottom:.8rem">${exam ? 'El examen está cargado pero desactivado.' : 'Aún no has cargado el examen oficial en el sistema.'}</p>
+      <div class="form-group" style="max-width:260px;margin-bottom:.8rem">
+        <label>¿A qué grado se aplicará?</label>
+        <select onchange="setDiagGradoDestino(this.value)">
+          <option value="1" ${diagGradoDestino==='1'?'selected':''}>1°</option>
+          <option value="2" ${diagGradoDestino==='2'?'selected':''}>2°</option>
+          <option value="3" ${diagGradoDestino==='3'?'selected':''}>3°</option>
+          <option value="all" ${diagGradoDestino==='all'?'selected':''}>Todos los grados</option>
+        </select>
+      </div>
       <div class="btn-row">
         <button class="btn btn-primary" onclick="cargarExamenDiagnostico()">📥 ${exam?'Reactivar':'Cargar'} Examen de Diagnóstico Oficial</button>
       </div>
-      <p class="sub" style="margin-top:.7rem">Se aplicará automáticamente a <strong>todos los grupos de 1er grado</strong>. Los alumnos lo verán en su pestaña de Exámenes.</p>
+      <p class="sub" style="margin-top:.7rem">Se aplicará automáticamente a <strong>${gradoLbl(exam?exam.grado:diagGradoDestino)} (todos los grupos)</strong>. Los alumnos lo verán en su pestaña de Exámenes.</p>
     </div>`;
     return html;
   }
 
   html += `<div class="panel">
-    <p class="sub" style="margin:0">✅ Examen activo — <strong>${exam.questions.length} preguntas</strong> en <strong>${exam.bloques.length} bloques</strong>, aplicado a <strong>1° (todos los grupos)</strong>.</p>
-    <div class="btn-row" style="margin-top:.7rem">
-      <button class="btn btn-sec" onclick="cargarExamenDiagnostico()">🔄 Recargar versión oficial</button>
+    <p class="sub" style="margin:0">✅ Examen activo — <strong>${exam.questions.length} preguntas</strong> en <strong>${exam.bloques.length} bloques</strong>, aplicado a <strong>${gradoLbl(exam.grado)} (todos los grupos)</strong>.</p>
+    <div class="form-group" style="max-width:260px;margin:.8rem 0">
+      <label>Cambiar grado destinatario</label>
+      <select onchange="cambiarGradoDiagnostico(this.value)">
+        <option value="1" ${exam.grado==='1'?'selected':''}>1°</option>
+        <option value="2" ${exam.grado==='2'?'selected':''}>2°</option>
+        <option value="3" ${exam.grado==='3'?'selected':''}>3°</option>
+        <option value="all" ${exam.grado==='all'?'selected':''}>Todos los grados</option>
+      </select>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-sec" onclick="cargarExamenDiagnostico()">🔄 Recargar versión oficial (conserva el grado)</button>
       <button class="btn btn-danger" onclick="eliminarExamenDiagnostico()">🚫 Desactivar</button>
     </div>
   </div>`;
@@ -2575,11 +2610,14 @@ function viewDiagnosticoSubfolder(){
 }
 
 function viewDiagnosticoDashboard(exam){
-  const alumnos1 = getAlumnosDesdeCalif().filter(a=>a.grado==='1');
-  const gruposDisponibles = [...new Set(alumnos1.map(a=>a.grupo).filter(Boolean))].sort();
+  const todosAlumnos = getAlumnosDesdeCalif();
+  // Respeta el grado configurado en el examen. Si es 'all', incluye a todos los grados.
+  const alumnosGrado = exam.grado==='all' ? todosAlumnos : todosAlumnos.filter(a=>a.grado===exam.grado);
+  const gradoLbl = exam.grado==='all' ? 'todos los grados' : gradoLabel(exam.grado);
+  const gruposDisponibles = [...new Set(alumnosGrado.map(a=>a.grupo).filter(Boolean))].sort();
   const grupoSel = diagGrupoFiltro;
 
-  const alumnosFiltrados = grupoSel==='todos' ? alumnos1 : alumnos1.filter(a=>a.grupo===grupoSel);
+  const alumnosFiltrados = grupoSel==='todos' ? alumnosGrado : alumnosGrado.filter(a=>a.grupo===grupoSel);
   const codigosFiltrados = new Set(alumnosFiltrados.map(a=>_normCode(a.id)));
 
   const resultados = (portal.examResults||[])
@@ -2590,14 +2628,14 @@ function viewDiagnosticoDashboard(exam){
     <div class="form-group" style="max-width:260px">
       <label>Filtrar por grupo</label>
       <select onchange="setDiagGrupoFiltro(this.value)">
-        <option value="todos" ${grupoSel==='todos'?'selected':''}>Todos los grupos de 1°</option>
+        <option value="todos" ${grupoSel==='todos'?'selected':''}>Todos los grupos (${gradoLbl})</option>
         ${gruposDisponibles.map(g=>`<option value="${g}" ${grupoSel===g?'selected':''}>Grupo ${g}</option>`).join('')}
       </select>
     </div>
   </div>`;
 
   if(!alumnosFiltrados.length){
-    return nav + `<div class="empty" style="padding:1.5rem"><p style="margin:0">No hay alumnos registrados de 1er grado${grupoSel!=='todos'?` en el grupo ${grupoSel}`:''}.</p></div>`;
+    return nav + `<div class="empty" style="padding:1.5rem"><p style="margin:0">No hay alumnos registrados de ${gradoLbl}${grupoSel!=='todos'?` en el grupo ${grupoSel}`:''}.</p></div>`;
   }
   if(!resultados.length){
     return nav + `<div class="empty" style="padding:1.5rem"><p style="margin:0">Aún nadie ha presentado el examen${grupoSel!=='todos'?` en el grupo ${grupoSel}`:''}.</p></div>`;
@@ -2628,7 +2666,8 @@ function viewDiagnosticoDashboard(exam){
     return { nombre, pct, aciertos, total, nPreguntas: preguntasDelBloque.length };
   }).sort((a,b)=>a.pct-b.pct); // peor dominado primero
 
-  // ── Por alumno: calificación + bloques débiles (<50% de aciertos) ──
+  // ── Por alumno: calificación + grado + bloques débiles (<50% de aciertos) ──
+  const mostrarGrado = exam.grado==='all';
   const porAlumno = resultados.map(r=>{
     const alumno = alumnosFiltrados.find(a=>_normCode(a.id)===_normCode(r.studentCode));
     const calif = (r.score/r.total)*10;
@@ -2640,7 +2679,7 @@ function viewDiagnosticoDashboard(exam){
       const pct = ac/preguntasDelBloque.length;
       return pct<0.5 ? nombre : null;
     }).filter(Boolean);
-    return { nombre: r.studentName, grupo: alumno?alumno.grupo:'—', calif, bloquesDebiles };
+    return { nombre: r.studentName, grado: alumno?alumno.grado:'—', grupo: alumno?alumno.grupo:'—', calif, bloquesDebiles };
   }).sort((a,b)=>a.calif-b.calif);
 
   return nav + `
@@ -2686,11 +2725,12 @@ function viewDiagnosticoDashboard(exam){
       <p class="sub" style="margin-bottom:.8rem">Ordenado del que necesita más apoyo al que necesita menos. Los temas listados son donde ese alumno acertó menos de la mitad.</p>
       <div class="table-wrap">
         <table>
-          <thead><tr><th>Alumno</th><th style="width:70px;text-align:center">Grupo</th><th style="width:90px;text-align:center">Calif.</th><th>Temas a reforzar</th></tr></thead>
+          <thead><tr><th>Alumno</th>${mostrarGrado?'<th style="width:70px;text-align:center">Grado</th>':''}<th style="width:70px;text-align:center">Grupo</th><th style="width:90px;text-align:center">Calif.</th><th>Temas a reforzar</th></tr></thead>
           <tbody>
             ${porAlumno.map(a=>`
               <tr>
                 <td>${escHtml(a.nombre)}</td>
+                ${mostrarGrado?`<td style="text-align:center">${gradoLabel(a.grado)}</td>`:''}
                 <td style="text-align:center">${escHtml(a.grupo)}</td>
                 <td style="text-align:center;font-weight:700;color:${a.calif<PASA?'#c0392b':'#2a7a4b'}">${a.calif.toFixed(1)}</td>
                 <td style="font-size:.82rem">${a.bloquesDebiles.length ? a.bloquesDebiles.map(b=>`<span class="pill" style="background:#fdeaea;color:#c0392b;margin:2px">${escHtml(b)}</span>`).join('') : '<span class="sub">— Ninguno, buen dominio general —</span>'}</td>
