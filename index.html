@@ -747,7 +747,7 @@ const firebaseConfig = {
   appId: "1:791739764579:web:7b04d2b07a9775712c8d56"
 };
 
-let fbApp=null, fbDb=null, fbConnected=false, fbReady=false;
+let fbApp=null, fbDb=null, fbStorage=null, fbConnected=false, fbReady=false;
 
 /* ── CHAT: estado global ─────────────────────────────── */
 let currentChatRoomId=null, chatMyPresRef=null, chatPresListenerRef=null, chatDmListenerRef=null;
@@ -815,8 +815,19 @@ function loadFirebaseSDK(){
         s2.src = base + 'firebase-database-compat.js';
         s2.onload = () => {
           if(typeof firebase !== 'undefined' && firebase.database){
-            console.log('[Firebase] Cargado exitosamente desde', base);
-            resolve();
+            // Storage es opcional: si no carga, la app sigue funcionando
+            // (los archivos se guardarán como antes, embebidos en la base de datos).
+            const s3 = document.createElement('script');
+            s3.src = base + 'firebase-storage-compat.js';
+            s3.onload = () => {
+              console.log('[Firebase] Cargado exitosamente desde', base);
+              resolve();
+            };
+            s3.onerror = () => {
+              console.warn('[Firebase] Storage no cargó desde', base, '— se continúa sin Storage');
+              resolve();
+            };
+            document.head.appendChild(s3);
           } else {
             console.warn('[Firebase] Script cargó pero firebase no está definido en', base);
             tryNext();
@@ -839,6 +850,10 @@ function initFirebase(){
       fbApp = firebase.initializeApp(firebaseConfig);
       fbDb = firebase.database();
       fbReady = true;
+      if(typeof firebase.storage === 'function'){
+        try{ fbStorage = firebase.storage(); }
+        catch(err){ console.warn('[Firebase] Storage no disponible:', err.message); fbStorage = null; }
+      }
       fbDb.ref('.info/connected').on('value', snap=>{
         fbConnected = !!snap.val();
         if(fbConnected){
@@ -1175,6 +1190,80 @@ function flashUpdate(){
       p.classList.add('flash-update');
     });
   }, 30);
+}
+
+// ═══════════════════════════════════════════
+// 📦 ARCHIVOS EN FIREBASE STORAGE (en vez de base64 en la base de datos)
+// Antes, los archivos subidos (imágenes, PDFs, adjuntos) se guardaban como
+// texto base64 DENTRO de la base de datos en tiempo real — eso hacía que
+// los envíos pesaran varios MB y fallaran ("Write too large"). Ahora el
+// archivo se sube a Storage y en la base de datos solo se guarda el link
+// de descarga (unos cuantos bytes), así que el tamaño deja de ser problema.
+// ═══════════════════════════════════════════
+function uploadFileToStorage(file, path){
+  return new Promise((resolve,reject)=>{
+    if(!fbReady || !fbStorage){ reject(new Error('Firebase Storage no está disponible')); return; }
+    const safePath = 'portal_files/'+String(path).replace(/[^a-zA-Z0-9_.\-\/]/g,'_');
+    fbStorage.ref().child(safePath).put(file)
+      .then(snap=>snap.ref.getDownloadURL())
+      .then(resolve)
+      .catch(reject);
+  });
+}
+
+function _dataURLtoBlob(dataurl){
+  const arr = dataurl.split(',');
+  const mimeMatch = arr[0].match(/:(.*?);/);
+  const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+  const bstr = atob(arr[1]);
+  let n = bstr.length;
+  const u8arr = new Uint8Array(n);
+  while(n--){ u8arr[n] = bstr.charCodeAt(n); }
+  return new Blob([u8arr], {type:mime});
+}
+
+function _uploadDataUrlToStorage(dataUrl, path){
+  return uploadFileToStorage(_dataURLtoBlob(dataUrl), path);
+}
+
+// Recorre materiales y actividades ya guardados y sube a Storage cualquier
+// adjunto que todavía esté embebido como base64 (de antes de este cambio),
+// reemplazando su contenido por el link de descarga. Así se libera espacio
+// sin tener que volver a subir cada archivo a mano.
+async function migrateHeavyAttachmentsToStorage(){
+  if(!fbReady || !fbStorage){
+    toast('Firebase Storage no está disponible ahora mismo. Revisa tu conexión o que Storage esté habilitado en el proyecto.','error');
+    return;
+  }
+  toast('Optimizando archivos pesados… esto puede tardar un poco','success');
+  let migrated = 0, failed = 0;
+  for(const m of (portal.materials||[])){
+    if(m.content && typeof m.content==='string' && m.content.startsWith('data:') && m.content.length>150000){
+      try{
+        const url = await _uploadDataUrlToStorage(m.content, `materials/${m.id}_${(m.filename||m.title||'archivo').replace(/\s+/g,'_')}`);
+        m.content = url; m._offloadedToStorage = true;
+        migrated++;
+      }catch(err){ console.error('Migración falló para material', m.title, err); failed++; }
+    }
+  }
+  for(const a of (portal.activities||[])){
+    if(Array.isArray(a.attachments)){
+      for(const at of a.attachments){
+        if(at.content && typeof at.content==='string' && at.content.startsWith('data:') && at.content.length>150000){
+          try{
+            const url = await _uploadDataUrlToStorage(at.content, `activities/${a.id}_${(at.filename||at.name||'archivo').replace(/\s+/g,'_')}`);
+            at.content = url; at._offloadedToStorage = true;
+            migrated++;
+          }catch(err){ console.error('Migración falló para adjunto', at.name, err); failed++; }
+        }
+      }
+    }
+  }
+  saveStore();
+  if(migrated>0) toast(`✓ ${migrated} archivo(s) movidos a almacenamiento optimizado${failed?` (${failed} no se pudieron mover)`:''}`,'success');
+  else if(failed>0) toast(`No se pudo optimizar ningún archivo (${failed} error(es)). Revisa las reglas de Storage.`,'error');
+  else toast('No se encontraron archivos pesados por optimizar ✓','success');
+  renderTeacherContent();
 }
 
 // Tamaño aproximado en bytes de un valor tal como se enviaría a Firebase
@@ -2234,9 +2323,14 @@ async function saveMaterial(){
     } else if(type==='doc' || type==='image'){
       const file = document.getElementById('mFile').files[0];
       if(!file){ toast('Selecciona un archivo','error'); return; }
-      if(file.size > 4*1024*1024){ toast('Archivo muy grande (máx 4 MB)','error'); return; }
-      content = await fileToBase64(file);
+      if(file.size > 20*1024*1024){ toast('Archivo muy grande (máx 20 MB)','error'); return; }
       filename = file.name;
+      if(fbReady && fbStorage){
+        content = await uploadFileToStorage(file, `materials/${uid()}_${file.name}`);
+      } else {
+        if(file.size > 4*1024*1024){ toast('Sin Firebase Storage disponible, el máximo es 4 MB','error'); return; }
+        content = await fileToBase64(file);
+      }
     } else if(type==='game'){
       const file = document.getElementById('mFile').files[0];
       const code = document.getElementById('mHtmlCode').value.trim();
@@ -2248,7 +2342,7 @@ async function saveMaterial(){
         content = code;
       } else { toast('Carga un archivo HTML o pega el código','error'); return; }
     }
-  }catch(err){ toast('Error al leer el archivo','error'); return; }
+  }catch(err){ console.error(err); toast('Error al leer/subir el archivo','error'); return; }
   portal.materials.push({
     id: uid(), type, title, desc, grado, grupo, content, filename,
     createdAt: new Date().toISOString(), visible: true
@@ -2999,12 +3093,24 @@ function toggleAllVis(val){
 
 // ── IMPORT / EXPORT ──
 function viewIO(){
+  const heavyCount = (portal.materials||[]).filter(m=>m.content && typeof m.content==='string' && m.content.startsWith('data:') && m.content.length>150000).length
+    + (portal.activities||[]).reduce((n,a)=>n+(Array.isArray(a.attachments)?a.attachments.filter(at=>at.content && typeof at.content==='string' && at.content.startsWith('data:') && at.content.length>150000).length:0),0);
+  const storageOn = fbReady && fbStorage;
   return `
     <div class="panel">
       <h3>☁️ Sincronización con Firebase</h3>
       <p class="sub">Los cambios se publican automáticamente cuando estás en línea. Usa este botón si quieres forzar una publicación inmediata.</p>
       <div class="btn-row">
         <button class="btn btn-green" onclick="forcePublish()">☁️ Publicar todo a Firebase ahora</button>
+      </div>
+    </div>
+    <div class="panel">
+      <h3>📦 Optimizar archivos pesados</h3>
+      <p class="sub">${storageOn
+        ? `Los archivos nuevos que subes ya se guardan de forma optimizada (Firebase Storage), no ocupan espacio en la base de datos. ${heavyCount>0 ? `Detectamos <b>${heavyCount} archivo(s)</b> subidos antes de este cambio que todavía pesan mucho — usa este botón para moverlos y liberar espacio, sin tener que volver a subirlos.` : 'No detectamos archivos pesados pendientes de optimizar ✓'}`
+        : `⚠️ Firebase Storage no está disponible ahora mismo (revisa tu conexión o que Storage esté habilitado y con reglas abiertas en tu proyecto de Firebase). Mientras tanto, los archivos se siguen guardando con un límite más chico (4 MB) directamente en la base de datos.`}</p>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="migrateHeavyAttachmentsToStorage()" ${storageOn?'':'disabled'}>📦 Optimizar archivos pesados ahora${heavyCount>0?` (${heavyCount})`:''}</button>
       </div>
     </div>
     <div class="panel">
@@ -3521,7 +3627,7 @@ function viewActivities(){
 
       <div style="background:var(--soft);padding:1rem 1.2rem;border-radius:10px;margin-top:.5rem">
         <h3 style="font-size:.95rem;margin-bottom:.6rem">📎 Adjuntos para los alumnos</h3>
-        <p class="sub" style="margin-bottom:.6rem;font-size:.82rem">Puedes incluir enlaces web (YouTube, sitios) y/o archivos (Word, Excel, PowerPoint, PDF, imágenes). Hasta ${ACT_ATTACH_LIMIT_MB} MB por archivo.</p>
+        <p class="sub" style="margin-bottom:.6rem;font-size:.82rem">Puedes incluir enlaces web (YouTube, sitios) y/o archivos (Word, Excel, PowerPoint, PDF, imágenes). Hasta ${(fbReady&&fbStorage)?20:ACT_ATTACH_LIMIT_MB} MB por archivo.</p>
         <div class="form-row">
           <div class="form-group">
             <label>Agregar enlace web</label>
@@ -3577,26 +3683,29 @@ function addDraftLink(){
 async function addDraftFiles(e){
   const files = Array.from(e.target.files||[]);
   if(!files.length) return;
-  const limit = ACT_ATTACH_LIMIT_MB*1024*1024;
+  const useStorage = fbReady && fbStorage;
+  const limit = (useStorage ? 20 : ACT_ATTACH_LIMIT_MB) * 1024*1024;
   const totalLimit = ACT_ATTACH_TOTAL_LIMIT_MB*1024*1024;
-  let currentTotal = (activityDraft.attachments||[]).reduce((sum,a)=> sum + (a.size || (a.content?String(a.content).length*0.75:0)), 0);
+  let currentTotal = useStorage ? 0 : (activityDraft.attachments||[]).reduce((sum,a)=> sum + (a.size || (a.content?String(a.content).length*0.75:0)), 0);
   for(const f of files){
     if(f.size > limit){
-      toast(`"${f.name}" es muy grande (máx ${ACT_ATTACH_LIMIT_MB} MB)`,'error');
+      toast(`"${f.name}" es muy grande (máx ${useStorage?20:ACT_ATTACH_LIMIT_MB} MB)`,'error');
       continue;
     }
-    if(currentTotal + f.size > totalLimit){
+    if(!useStorage && currentTotal + f.size > totalLimit){
       toast(`No se agregó "${f.name}": esta actividad ya suma casi ${ACT_ATTACH_TOTAL_LIMIT_MB} MB en adjuntos. Usa un enlace en vez de subir el archivo.`,'error');
       continue;
     }
     try{
-      const b64 = await fileToBase64(f);
+      const content = useStorage
+        ? await uploadFileToStorage(f, `activities/${activityDraft.id||uid()}_${f.name}`)
+        : await fileToBase64(f);
       activityDraft.attachments.push({
         type:'file', name: f.name, filename: f.name,
-        content: b64, size: f.size, mime: f.type||''
+        content, size: f.size, mime: f.type||''
       });
       currentTotal += f.size;
-    }catch(err){ toast(`Error al leer "${f.name}"`,'error'); }
+    }catch(err){ console.error(err); toast(`Error al subir "${f.name}"`,'error'); }
   }
   e.target.value = '';
   renderTeacherContent();
@@ -4501,7 +4610,7 @@ function renderStudentActivityCard(a){
     submitFormHtml = `
       <div style="background:var(--soft);border-radius:10px;padding:1rem 1.2rem;margin-top:.8rem">
         <h4 style="margin-bottom:.6rem;font-size:.95rem">${submitted?'🔄 Reemplazar mi entrega':'📤 Subir mi entrega'}</h4>
-        <p class="sub" style="font-size:.8rem;margin-bottom:.6rem">Puedes subir hasta ${ACT_MAX_FILES_PER_SUBMISSION} archivos (Word, Excel, PowerPoint, PDF, imágenes…). Máx ${ACT_FILE_LIMIT_MB} MB por archivo.</p>
+        <p class="sub" style="font-size:.8rem;margin-bottom:.6rem">Puedes subir hasta ${ACT_MAX_FILES_PER_SUBMISSION} archivos (Word, Excel, PowerPoint, PDF, imágenes…). Máx ${(fbReady&&fbStorage)?20:ACT_FILE_LIMIT_MB} MB por archivo.</p>
         <div class="form-row">
           <div class="form-group" style="grid-column:span 2">
             <label>Selecciona uno o varios archivos</label>
@@ -4583,16 +4692,17 @@ async function submitActivity(actId){
     return;
   }
   // Validate file sizes
-  const limit = ACT_FILE_LIMIT_MB*1024*1024;
+  const useStorage = fbReady && fbStorage;
+  const limit = (useStorage ? 20 : ACT_FILE_LIMIT_MB) * 1024*1024;
   let totalBytes = 0;
   for(const f of files){
     if(f.size > limit){
-      toast(`"${f.name}" es muy grande (máx ${ACT_FILE_LIMIT_MB} MB)`,'error');
+      toast(`"${f.name}" es muy grande (máx ${useStorage?20:ACT_FILE_LIMIT_MB} MB)`,'error');
       return;
     }
     totalBytes += f.size;
   }
-  if(totalBytes > ACT_SUBMISSION_TOTAL_LIMIT_MB*1024*1024){
+  if(!useStorage && totalBytes > ACT_SUBMISSION_TOTAL_LIMIT_MB*1024*1024){
     toast(`Entre todos los archivos suman más de ${ACT_SUBMISSION_TOTAL_LIMIT_MB} MB. Sube menos archivos o comprímelos.`,'error');
     return;
   }
@@ -4602,13 +4712,16 @@ async function submitActivity(actId){
   let processedFiles = [];
   if(files.length){
     try{
+      const safeCode = String(session.code||'').replace(/[^a-zA-Z0-9_-]/g,'_');
       for(const f of files){
-        const b64 = await fileToBase64(f);
+        const content = useStorage
+          ? await uploadFileToStorage(f, `submissions/${actId}_${safeCode}_${f.name}`)
+          : await fileToBase64(f);
         processedFiles.push({
-          name: f.name, mime: f.type||'', size: f.size, content: b64
+          name: f.name, mime: f.type||'', size: f.size, content
         });
       }
-    }catch(err){ toast('Error al leer los archivos','error'); return; }
+    }catch(err){ console.error(err); toast('Error al subir los archivos','error'); return; }
   } else if(existing){
     // No new files: keep existing
     processedFiles = existing.files || [];
