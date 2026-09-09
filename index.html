@@ -1038,26 +1038,63 @@ function changeTeacherChatRoom(id){
 
 function subscribeFirebase(){
   if(!fbReady) return;
-  // Teacher data (materials, exams, calif, registroAlumnos, activities)
+  // Teacher data (exams, calif, registroAlumnos, rúbrica, aprendizajes)
+  // Materiales y actividades ya NO viven aquí — cada uno se guarda y se
+  // borra individualmente (ver más abajo) para que un archivo pesado nunca
+  // bloquee el borrado/ocultado de los demás.
   fbDb.ref('portal/data').on('value', snap=>{
     const v = snap.val();
     if(v){
       suppressSync = true;
-      portal.materials = v.materials || [];
       portal.exams = v.exams || [];
       portal.registroAlumnos = v.registroAlumnos || [];
-      portal.activities = v.activities || [];
       portal.rubricaGlobal = v.rubricaGlobal || null;
       portal.aprendizajes = v.aprendizajes || [];
       // Only overwrite calif from portal/data if calificaciones/data hasn't pushed yet
       if(v.calif && !portal._califFromRegistro) portal.calif = v.calif;
       _persistLocal();
       suppressSync = false;
+      // Migración de una sola vez: si todavía hay materiales/actividades en
+      // el formato viejo (arreglo dentro de portal/data) y aún no se movieron
+      // al formato nuevo (por elemento), se copian ahora — así no se pierde
+      // nada de lo que ya tenías guardado.
+      if(Array.isArray(v.materials) && v.materials.length && !portal._materialsMigrated){
+        portal._materialsMigrated = true;
+        v.materials.forEach(m=>{ if(m && m.id) fbDb.ref('portal/data/materialsList/'+m.id).set(m).catch(()=>{}); });
+      }
+      if(Array.isArray(v.activities) && v.activities.length && !portal._activitiesMigrated){
+        portal._activitiesMigrated = true;
+        v.activities.forEach(a=>{ if(a && a.id) fbDb.ref('portal/data/activitiesList/'+a.id).set(a).catch(()=>{}); });
+      }
       if(session && (session.role==='teacher' || session.role==='student' || session.role==='parent')){
         if(session.role==='teacher') renderTeacherContent();
         else if(session.role==='student') renderStudentContentSafe();
         else if(session.role==='parent') renderParentContent();
       }
+    }
+  });
+  // ── Materiales — un nodo por material, guardado/borrado individualmente ──
+  fbDb.ref('portal/data/materialsList').on('value', snap=>{
+    const v = snap.val();
+    suppressSync = true;
+    portal.materials = v ? Object.values(v) : [];
+    _persistLocal();
+    suppressSync = false;
+    if(session){
+      if(session.role==='teacher') renderTeacherContent();
+      else if(session.role==='student') renderStudentContentSafe();
+    }
+  });
+  // ── Actividades — un nodo por actividad, guardado/borrado individualmente ──
+  fbDb.ref('portal/data/activitiesList').on('value', snap=>{
+    const v = snap.val();
+    suppressSync = true;
+    portal.activities = v ? Object.values(v) : [];
+    _persistLocal();
+    suppressSync = false;
+    if(session){
+      if(session.role==='teacher') renderTeacherContent();
+      else if(session.role==='student') renderStudentContentSafe();
     }
   });
   // ── REAL-TIME from Registro de Calificaciones ──
@@ -1237,23 +1274,62 @@ function _approxSize(obj){
 }
 const MAX_SYNC_BYTES = 8*1024*1024; // margen seguro por colección — Firebase falla con "Write too large" en escrituras muy pesadas
 
+// Materiales y actividades ya no van en este guardado por bloque — cada uno
+// se guarda/borra por su cuenta con pushMaterialFB/removeMaterialFB y
+// pushActivityFB/removeActivityFB (ver más abajo), así un archivo pesado
+// nunca bloquea el borrado o guardado de los demás.
+function pushMaterialFB(material){
+  if(!fbReady || !fbConnected) return Promise.resolve();
+  const size = _approxSize(material);
+  if(size > MAX_SYNC_BYTES){
+    toast(`⚠️ "${material.title}" pesa demasiado (${(size/1024/1024).toFixed(1)} MB) para guardarse en la nube.`,'error');
+    return Promise.reject(new Error('material too large'));
+  }
+  return fbDb.ref('portal/data/materialsList/'+material.id).set(material).catch(err=>{
+    console.error('Error al guardar material', err);
+    toast('Error al sincronizar el material con Firebase','error');
+    throw err;
+  });
+}
+function removeMaterialFB(id){
+  if(!fbReady || !fbConnected) return Promise.resolve();
+  return fbDb.ref('portal/data/materialsList/'+id).remove().catch(err=>{
+    console.error('Error al borrar material', err);
+    toast('Error al borrar el material en Firebase','error');
+  });
+}
+function pushActivityFB(activity){
+  if(!fbReady || !fbConnected) return Promise.resolve();
+  const size = _approxSize(activity);
+  if(size > MAX_SYNC_BYTES){
+    toast(`⚠️ "${activity.title}" pesa demasiado (${(size/1024/1024).toFixed(1)} MB) para guardarse en la nube.`,'error');
+    return Promise.reject(new Error('activity too large'));
+  }
+  return fbDb.ref('portal/data/activitiesList/'+activity.id).set(activity).catch(err=>{
+    console.error('Error al guardar actividad', err);
+    toast('Error al sincronizar la actividad con Firebase','error');
+    throw err;
+  });
+}
+function removeActivityFB(id){
+  if(!fbReady || !fbConnected) return Promise.resolve();
+  return fbDb.ref('portal/data/activitiesList/'+id).remove().catch(err=>{
+    console.error('Error al borrar actividad', err);
+    toast('Error al borrar la actividad en Firebase','error');
+  });
+}
+
 function syncToFirebase(immediate){
   if(!fbReady || !fbConnected || suppressSync) return;
   if(!session || session.role!=='teacher') return;
   clearTimeout(syncTimer);
   const doSync = ()=>{
-    // Antes se mandaba TODO junto en un solo .set() a 'portal/data'. Si un
-    // solo adjunto (imagen/PDF) era muy pesado, esa escritura fallaba con
-    // "Write too large" Y se llevaba entre pies TODO lo demás (calif,
-    // registroAlumnos, exámenes...) aunque no tuvieran nada grande.
-    // Ahora cada colección se guarda por separado: si una falla por peso,
-    // las demás igual se guardan, y se avisa exactamente cuál falló.
+    // materials y activities NO van aquí (ver pushMaterialFB/pushActivityFB) —
+    // este bloque solo cubre las colecciones que siguen siendo un objeto único.
     const collections = {
-      materials: portal.materials || [],
       exams: portal.exams || [],
       calif: portal.calif || null,
       registroAlumnos: portal.registroAlumnos || [],
-      activities: portal.activities || [],
       rubricaGlobal: portal.rubricaGlobal || null,
       aprendizajes: portal.aprendizajes || []
     };
@@ -1261,7 +1337,7 @@ function syncToFirebase(immediate){
       const size = _approxSize(value);
       if(size > MAX_SYNC_BYTES){
         console.warn(`[Sync] "${key}" pesa ${(size/1024/1024).toFixed(1)} MB — se omite ese guardado hasta reducir su tamaño.`);
-        toast(`⚠️ "${key}" pesa demasiado (${(size/1024/1024).toFixed(1)} MB) para guardarse en la nube. Revisa si hay un archivo adjunto muy grande y reemplázalo por un enlace.`,'error');
+        toast(`⚠️ "${key}" pesa demasiado (${(size/1024/1024).toFixed(1)} MB) para guardarse en la nube.`,'error');
         return Promise.resolve();
       }
       return fbDb.ref('portal/data/'+key).set(value).catch(err=>{
@@ -1335,17 +1411,20 @@ function pushReflexionFB(reflexion){
 function forcePublish(){
   if(!fbReady){ toast('Firebase no se inicializó','error'); return; }
   if(!fbConnected){ toast('Sin conexión a Firebase','error'); return; }
-  fbDb.ref('portal/data').set({
-    materials: portal.materials || [],
+  fbDb.ref('portal/data').update({
     exams: portal.exams || [],
     calif: portal.calif || null,
     registroAlumnos: portal.registroAlumnos || [],
-    activities: portal.activities || [],
     rubricaGlobal: portal.rubricaGlobal || null,
     aprendizajes: portal.aprendizajes || [],
     updatedAt: Date.now()
-  }).then(()=>{
-    toast('Publicado a Firebase ✓','success');
+  }).then(async ()=>{
+    const results = await Promise.allSettled([
+      ...(portal.materials||[]).map(m=>pushMaterialFB(m)),
+      ...(portal.activities||[]).map(a=>pushActivityFB(a))
+    ]);
+    const failed = results.filter(r=>r.status==='rejected').length;
+    toast(failed ? `Publicado con ${failed} archivo(s) que no cupieron (revisa "Archivos pesados")` : 'Publicado a Firebase ✓', failed?'error':'success');
   }).catch(err=>{
     console.error(err);
     toast('Error: '+err.message,'error');
@@ -2309,12 +2388,19 @@ async function saveMaterial(){
       } else { toast('Carga un archivo HTML o pega el código','error'); return; }
     }
   }catch(err){ console.error(err); toast('Error al leer/subir el archivo','error'); return; }
-  portal.materials.push({
+  const material = {
     id: uid(), type, title, desc, grado, grupo, content, filename,
     createdAt: new Date().toISOString(), visible: true
-  });
-  saveStore(); renderTeacherContent();
-  toast('Material guardado ✓','success');
+  };
+  portal.materials.push(material);
+  _persistLocal();
+  renderTeacherContent();
+  try{
+    await pushMaterialFB(material);
+    toast('Material guardado ✓','success');
+  }catch(err){
+    // Se guardó localmente pero no en la nube (ver toast de pushMaterialFB)
+  }
 }
 function renderMaterialList(withActions){
   if(!portal.materials.length) return `<div class="empty"><div class="big">📁</div><p>Aún no hay materiales.</p></div>`;
@@ -2344,12 +2430,18 @@ function renderMaterialList(withActions){
 }
 function toggleMat(id){
   const m = portal.materials.find(x=>x.id===id);
-  if(m){ m.visible=!m.visible; saveStore(); renderTeacherContent(); }
+  if(!m) return;
+  m.visible=!m.visible;
+  _persistLocal();
+  renderTeacherContent();
+  pushMaterialFB(m).catch(()=>{}); // el toast de error ya lo muestra pushMaterialFB
 }
 function delMat(id){
   if(!confirm('¿Eliminar este material?')) return;
   portal.materials = portal.materials.filter(m=>m.id!==id);
-  saveStore(); renderTeacherContent();
+  _persistLocal();
+  renderTeacherContent();
+  removeMaterialFB(id);
   toast('Material eliminado','success');
 }
 
@@ -3053,7 +3145,9 @@ function viewVisibility(){
 function toggleAllVis(val){
   portal.materials.forEach(m=>m.visible=val);
   portal.exams.forEach(e=>e.visible=val);
-  saveStore(); renderTeacherContent();
+  _persistLocal(); renderTeacherContent();
+  syncToFirebase(true); // exams (colección única)
+  portal.materials.forEach(m=> pushMaterialFB(m).catch(()=>{})); // materiales, uno por uno
   toast(val?'Todo visible':'Todo oculto','success');
 }
 
@@ -3079,11 +3173,16 @@ function eliminarArchivoPesado(ref){
   if(!confirm('¿Eliminar este archivo? El material o adjunto se quitará por completo — si quieres conservarlo, reemplázalo por un enlace en vez de eliminarlo.')) return;
   if(ref.kind==='material'){
     portal.materials = portal.materials.filter(m=>m.id!==ref.id);
+    _persistLocal();
+    removeMaterialFB(ref.id);
   } else if(ref.kind==='activityAttachment'){
     const a = portal.activities.find(x=>x.id===ref.activityId);
-    if(a && Array.isArray(a.attachments)) a.attachments.splice(ref.idx,1);
+    if(a && Array.isArray(a.attachments)){
+      a.attachments.splice(ref.idx,1);
+      _persistLocal();
+      pushActivityFB(a).catch(()=>{});
+    }
   }
-  saveStore();
   renderTeacherContent();
   toast('Archivo eliminado ✓','success');
 }
@@ -3153,7 +3252,10 @@ function importPortal(e){
       if(!data.materials || !data.exams){ toast('Archivo no válido','error'); return; }
       if(!confirm('¿Reemplazar todos los datos actuales con el archivo importado?')) return;
       portal = {...portal, ...data};
-      saveStore(); renderTeacherContent();
+      _persistLocal(); renderTeacherContent();
+      syncToFirebase(true);
+      (portal.materials||[]).forEach(m=> pushMaterialFB(m).catch(()=>{}));
+      (portal.activities||[]).forEach(a=> pushActivityFB(a).catch(()=>{}));
       toast('Portal importado ✓','success');
     }catch(err){ toast('JSON inválido','error'); }
   };
@@ -3163,9 +3265,12 @@ function wipePortal(){
   if(!confirm('¿Borrar TODO el contenido del portal? Esta acción no se puede deshacer.')) return;
   if(!confirm('Confirma de nuevo: se eliminarán materiales, actividades, exámenes, calificaciones y entregas.')) return;
   portal = { materials:[], exams:[], calif:null, examResults:[], registroAlumnos:[], activities:[], submissions:[] };
-  saveStore();
-  // Also wipe submissions in Firebase
+  _persistLocal();
+  syncToFirebase(true);
+  // También borra materiales, actividades y entregas en Firebase
   if(fbReady && fbConnected){
+    fbDb.ref('portal/data/materialsList').remove().catch(()=>{});
+    fbDb.ref('portal/data/activitiesList').remove().catch(()=>{});
     fbDb.ref('portal/submissions').remove().catch(()=>{});
   }
   renderTeacherContent();
@@ -3728,17 +3833,18 @@ function removeDraftAttachment(idx){
   renderTeacherContent();
 }
 
-function saveActivity(){
+async function saveActivity(){
   const d = activityDraft;
   if(!d.title.trim()){ toast('Ingresa un título','error'); return; }
   if(!d.dueDate){ toast('Selecciona la fecha y hora de entrega','error'); return; }
   if(d.attachments.length===0){
     if(!confirm('No hay adjuntos. ¿Publicar la actividad solo con descripción?')) return;
   }
+  let activity;
   if(d._editingId){
     const idx = portal.activities.findIndex(a=>a.id===d._editingId);
     if(idx>=0){
-      portal.activities[idx] = {
+      activity = {
         ...portal.activities[idx],
         title: d.title.trim(),
         desc: d.desc.trim(),
@@ -3748,12 +3854,13 @@ function saveActivity(){
         attachments: JSON.parse(JSON.stringify(d.attachments)),
         updatedAt: new Date().toISOString()
       };
-      saveStore(); resetActivityDraft();
-      toast('Actividad actualizada ✓','success');
+      portal.activities[idx] = activity;
+      _persistLocal(); resetActivityDraft();
+      try{ await pushActivityFB(activity); toast('Actividad actualizada ✓','success'); }catch(err){}
       return;
     }
   }
-  portal.activities.push({
+  activity = {
     id: uid(),
     title: d.title.trim(),
     desc: d.desc.trim(),
@@ -3763,10 +3870,11 @@ function saveActivity(){
     attachments: JSON.parse(JSON.stringify(d.attachments)),
     createdAt: new Date().toISOString(),
     visible: true
-  });
-  saveStore();
+  };
+  portal.activities.push(activity);
+  _persistLocal();
   resetActivityDraft();
-  toast('Actividad publicada ✓','success');
+  try{ await pushActivityFB(activity); toast('Actividad publicada ✓','success'); }catch(err){}
 }
 
 function resetActivityDraft(){
@@ -3805,7 +3913,8 @@ function delActivity(id){
   // Delete its submissions
   const subsToRemove = portal.submissions.filter(s=>s.activityId===id);
   portal.submissions = portal.submissions.filter(s=>s.activityId!==id);
-  saveStore();
+  _persistLocal();
+  removeActivityFB(id);
   // Also remove from Firebase
   if(fbReady && fbConnected){
     subsToRemove.forEach(s=>{
@@ -3819,7 +3928,11 @@ function delActivity(id){
 
 function toggleActivity(id){
   const a = portal.activities.find(x=>x.id===id);
-  if(a){ a.visible = !a.visible; saveStore(); renderTeacherContent(); }
+  if(!a) return;
+  a.visible = !a.visible;
+  _persistLocal();
+  renderTeacherContent();
+  pushActivityFB(a).catch(()=>{});
 }
 
 function renderActivitiesList(){
