@@ -2794,14 +2794,53 @@ function viewDiagnosticoSubfolder(){
 // Reúne todos los cálculos del dashboard (estadísticas, bloques, por alumno)
 // en un solo lugar — así la vista en pantalla y el reporte para imprimir /
 // exportar a Word usan EXACTAMENTE los mismos números, sin duplicar lógica.
+// Detecta, para un grado dado, si el maestro tiene sus grupos reales
+// agrupados en clases combinadas (ej. "1° ABC" y "1° GHI" como dos clases
+// distintas) usando los contenedores del Registro de Calificaciones — el
+// mismo criterio que ya usa el chat. Si hay más de una combinación, esas
+// combinaciones se usan como opciones de filtro en vez de letras sueltas.
+function _diagGradoContainers(grado){
+  if(!portal.calif || !portal.calif.groups) return [];
+  const seen = new Map(); // classKey -> {ids:Set, letras:Set}
+  portal.calif.groups.forEach(g=>{
+    (g.students||[]).forEach(s=>{
+      const sGrado = _alumnoGradoPortal(s, g);
+      if(String(sGrado) !== String(grado)) return;
+      const key = _classKeyForGroupName(g.name);
+      if(!key) return;
+      if(!seen.has(key)) seen.set(key, { ids: new Set(), letras: new Set() });
+      const entry = seen.get(key);
+      entry.ids.add(_normCode(s.qrCode || s.id));
+      const letra = _alumnoGrupoPortal(s, g);
+      if(letra) entry.letras.add(letra);
+    });
+  });
+  return [...seen.entries()]
+    .map(([key, v])=>({ key, ids: v.ids, letras: [...v.letras].sort() }))
+    .filter(c=>c.letras.length)
+    .sort((a,b)=>a.letras.join('').localeCompare(b.letras.join('')));
+}
+
 function _diagDashboardData(exam){
   const todosAlumnos = getAlumnosDesdeCalif();
   const alumnosGrado = exam.grado==='all' ? todosAlumnos : todosAlumnos.filter(a=>a.grado===exam.grado);
   const gradoLbl = exam.grado==='all' ? 'todos los grados' : gradoLabel(exam.grado);
-  const gruposDisponibles = [...new Set(alumnosGrado.map(a=>a.grupo).filter(Boolean))].sort();
+
+  const containers = exam.grado==='all' ? [] : _diagGradoContainers(exam.grado);
+  const useContainers = containers.length > 1;
   const grupoSel = diagGrupoFiltro;
 
-  const alumnosFiltrados = grupoSel==='todos' ? alumnosGrado : alumnosGrado.filter(a=>a.grupo===grupoSel);
+  let gruposDisponibles, alumnosFiltrados, grupoSelLabel;
+  if(useContainers){
+    gruposDisponibles = containers.map(c=>({ value:c.key, label:'Grupo '+c.letras.join('') }));
+    const activo = containers.find(c=>c.key===grupoSel);
+    alumnosFiltrados = activo ? alumnosGrado.filter(a=>activo.ids.has(_normCode(a.id))) : alumnosGrado;
+    grupoSelLabel = activo ? ('Grupo '+activo.letras.join('')) : `Todos los grupos (${gradoLbl})`;
+  } else {
+    gruposDisponibles = [...new Set(alumnosGrado.map(a=>a.grupo).filter(Boolean))].sort().map(g=>({ value:g, label:'Grupo '+g }));
+    alumnosFiltrados = grupoSel==='todos' ? alumnosGrado : alumnosGrado.filter(a=>a.grupo===grupoSel);
+    grupoSelLabel = grupoSel==='todos' ? `Todos los grupos (${gradoLbl})` : ('Grupo '+grupoSel);
+  }
   const codigosFiltrados = new Set(alumnosFiltrados.map(a=>_normCode(a.id)));
 
   const resultados = (portal.examResults||[])
@@ -2845,7 +2884,7 @@ function _diagDashboardData(exam){
     return { nombre: r.studentName, grado: alumno?alumno.grado:'—', grupo: alumno?alumno.grupo:'—', calif, bloquesDebiles };
   }).sort((a,b)=>a.calif-b.calif);
 
-  return { gradoLbl, gruposDisponibles, grupoSel, alumnosFiltrados, resultados, PASA, aprobados, reprobados, promedioGrupo, pctPresentados, bloqueStats, mostrarGrado, porAlumno };
+  return { gradoLbl, gruposDisponibles, grupoSel, grupoSelLabel, alumnosFiltrados, resultados, PASA, aprobados, reprobados, promedioGrupo, pctPresentados, bloqueStats, mostrarGrado, porAlumno };
 }
 
 function viewDiagnosticoDashboard(exam){
@@ -2861,7 +2900,7 @@ function viewDiagnosticoDashboard(exam){
       <label>Filtrar por grupo</label>
       <select onchange="setDiagGrupoFiltro(this.value)">
         <option value="todos" ${grupoSel==='todos'?'selected':''}>Todos los grupos (${gradoLbl})</option>
-        ${gruposDisponibles.map(g=>`<option value="${g}" ${grupoSel===g?'selected':''}>Grupo ${g}</option>`).join('')}
+        ${gruposDisponibles.map(g=>`<option value="${escHtml(g.value)}" ${grupoSel===g.value?'selected':''}>${escHtml(g.label)}</option>`).join('')}
       </select>
     </div>
   </div>`;
@@ -2936,8 +2975,8 @@ function viewDiagnosticoDashboard(exam){
 
 /* ── Reporte imprimible / exportable a Word del Dashboard de Resultados ── */
 function _buildDiagReportInnerHtml(exam, d){
-  const { gradoLbl, grupoSel, alumnosFiltrados, resultados, PASA, aprobados, reprobados, promedioGrupo, pctPresentados, bloqueStats, mostrarGrado, porAlumno } = d;
-  const grupoTxt = grupoSel==='todos' ? gradoLbl : `${gradoLbl} · Grupo ${grupoSel}`;
+  const { gradoLbl, grupoSelLabel, alumnosFiltrados, resultados, PASA, aprobados, reprobados, promedioGrupo, pctPresentados, bloqueStats, mostrarGrado, porAlumno } = d;
+  const grupoTxt = `${gradoLbl} · ${grupoSelLabel}`;
   const fecha = new Date().toLocaleDateString('es-MX',{day:'2-digit',month:'long',year:'numeric'});
 
   const bloquesHtml = bloqueStats.map(b=>`
@@ -3053,7 +3092,7 @@ function exportDiagnosticoReportWord(examId){
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  const grupoTag = d.grupoSel==='todos' ? 'todos' : 'grupo'+d.grupoSel;
+  const grupoTag = d.grupoSelLabel.replace(/[^a-zA-Z0-9_\-]+/g,'_');
   a.download = `Diagnostico_${exam.title.replace(/[^a-zA-Z0-9_\-]+/g,'_')}_${grupoTag}.doc`;
   document.body.appendChild(a); a.click(); document.body.removeChild(a);
   URL.revokeObjectURL(url);
