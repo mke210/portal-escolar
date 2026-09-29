@@ -2262,11 +2262,13 @@ function normalizeStudentName(name){
 // ver getAlumnosDesdeCalif() más arriba).
 
 // ── MATERIALES ──
+let materialFolderDraft = []; // elementos de la carpeta que se está armando en el formulario
+
 function viewMaterials(){
   return `
     <div class="panel">
       <h3>📁 Subir Material</h3>
-      <p class="sub">Carga enlaces, documentos, imágenes y juegos HTML para compartir con los alumnos.</p>
+      <p class="sub">Carga enlaces, documentos, imágenes, juegos HTML o carpetas de proyecto para compartir con los alumnos.</p>
       <div class="form-row triple">
         <div class="form-group">
           <label>Tipo</label>
@@ -2275,6 +2277,7 @@ function viewMaterials(){
             <option value="doc">📄 Documento (Word/Excel/PPT/PDF)</option>
             <option value="image">🖼️ Imagen</option>
             <option value="game">🎮 Juego HTML</option>
+            <option value="folder">📁 Carpeta de proyecto</option>
           </select>
         </div>
         <div class="form-group">
@@ -2329,10 +2332,84 @@ function matTypeFields(type){
       <input type="file" id="mFile" accept=".html,.htm"></div>
     <div class="form-group"><label>O pega el código HTML aquí</label>
       <textarea id="mHtmlCode" placeholder="<html>...</html>"></textarea></div>`;
+  if(type==='folder') return `
+    <div style="background:var(--soft);padding:1rem 1.2rem;border-radius:10px">
+      <p class="sub" style="margin-bottom:.6rem;font-size:.82rem">Agrupa varios elementos en una sola carpeta: imágenes, documentos (Word/Excel/PPT/PDF) y enlaces (incluidos videos de YouTube). Los alumnos la verán como una sola tarjeta y podrán abrir cada elemento adentro.</p>
+      <div class="form-row">
+        <div class="form-group">
+          <label>Agregar enlace (video, sitio, etc.)</label>
+          <div style="display:flex;gap:.4rem">
+            <input type="url" id="mFolderLink" placeholder="https://...">
+            <button type="button" class="btn btn-blue btn-small" onclick="materialFolderAddLink()">➕ Agregar</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Agregar imágenes o documentos</label>
+          <input type="file" id="mFolderFiles" multiple accept=".doc,.docx,.xls,.xlsx,.ppt,.pptx,.pdf,image/*" onchange="materialFolderAddFiles(event)">
+        </div>
+      </div>
+      <div id="mFolderItems">${renderMaterialFolderDraftItems()}</div>
+    </div>`;
 }
 function matTypeChanged(){
   const t = document.getElementById('mType').value;
+  if(t!=='folder') materialFolderDraft = [];
   document.getElementById('mTypeFields').innerHTML = matTypeFields(t);
+}
+function renderMaterialFolderDraftItems(){
+  if(!materialFolderDraft.length) return '<p style="color:var(--muted);font-size:.83rem;margin-top:.6rem">Aún no hay elementos en la carpeta. Agrega enlaces o archivos arriba.</p>';
+  return `<div style="display:flex;flex-direction:column;gap:.5rem;margin-top:.6rem">${
+    materialFolderDraft.map((it,i)=>{
+      const icon = it.type==='link' ? '🔗' : _iconForMime(it.mime||it.filename||it.name||'');
+      const sz = it.size?` · ${(it.size/1024).toFixed(0)} KB`:'';
+      const linkPreview = it.type==='link' ? `<div style="font-size:.75rem;color:var(--accent2);word-break:break-all;margin-top:.2rem">${escHtml(it.content)}</div>` : '';
+      return `<div class="item" style="padding:.7rem .9rem;background:#fff">
+        <div class="i-icon">${icon}</div>
+        <div class="i-body">
+          <div class="i-title" style="font-size:.92rem">${escHtml(it.name||it.filename||'(sin nombre)')}</div>
+          <div class="i-meta"><span>${it.type==='link'?'Enlace':'Archivo'+sz}</span></div>
+          ${linkPreview}
+        </div>
+        <div class="i-actions"><button class="btn btn-danger btn-small" onclick="materialFolderRemoveItem(${i})">✕</button></div>
+      </div>`;
+    }).join('')
+  }</div>`;
+}
+function materialFolderAddLink(){
+  const inp = document.getElementById('mFolderLink');
+  const url = (inp.value||'').trim();
+  if(!url){ toast('Escribe un enlace primero','error'); return; }
+  if(!/^https?:\/\//i.test(url)){ toast('El enlace debe empezar con http:// o https://','error'); return; }
+  let displayName = url;
+  try{ const u = new URL(url); displayName = u.hostname + (u.pathname!=='/'?u.pathname:''); }catch(e){}
+  materialFolderDraft.push({ id: uid(), type:'link', name: displayName, content: url });
+  inp.value = '';
+  document.getElementById('mFolderItems').innerHTML = renderMaterialFolderDraftItems();
+}
+async function materialFolderAddFiles(e){
+  const files = Array.from(e.target.files||[]);
+  if(!files.length) return;
+  for(const f of files){
+    const isImage = f.type && f.type.startsWith('image/');
+    try{
+      let content, name = f.name, size = f.size, mime = f.type||'';
+      if(isImage){
+        const opt = await fileToOptimizedBase64(f);
+        content = opt.content; name = opt.filename; size = opt.size; mime = 'image/jpeg';
+        if(size > 4*1024*1024){ toast(`"${f.name}" sigue pesando mucho incluso comprimida`,'error'); continue; }
+      } else {
+        if(f.size > 4*1024*1024){ toast(`"${f.name}" es muy grande (máx 4 MB)`,'error'); continue; }
+        content = await fileToBase64(f);
+      }
+      materialFolderDraft.push({ id: uid(), type:'file', name, filename:name, content, size, mime });
+    }catch(err){ console.error(err); toast(`Error al leer "${f.name}"`,'error'); }
+  }
+  e.target.value = '';
+  document.getElementById('mFolderItems').innerHTML = renderMaterialFolderDraftItems();
+}
+function materialFolderRemoveItem(idx){
+  materialFolderDraft.splice(idx,1);
+  document.getElementById('mFolderItems').innerHTML = renderMaterialFolderDraftItems();
 }
 function fileToBase64(file){
   return new Promise((res,rej)=>{
@@ -2357,7 +2434,7 @@ async function saveMaterial(){
   const grado = document.getElementById('mGrado').value;
   const grupo = document.getElementById('mGrupo').value;
   if(!title){ toast('Ingresa un título','error'); return; }
-  let content = null, filename = '';
+  let content = null, filename = '', items = undefined;
   try{
     if(type==='link'){
       const url = document.getElementById('mUrl').value.trim();
@@ -2386,13 +2463,17 @@ async function saveMaterial(){
       } else if(code){
         content = code;
       } else { toast('Carga un archivo HTML o pega el código','error'); return; }
+    } else if(type==='folder'){
+      if(!materialFolderDraft.length){ toast('Agrega al menos un elemento a la carpeta','error'); return; }
+      items = JSON.parse(JSON.stringify(materialFolderDraft));
     }
   }catch(err){ console.error(err); toast('Error al leer/subir el archivo','error'); return; }
   const material = {
-    id: uid(), type, title, desc, grado, grupo, content, filename,
+    id: uid(), type, title, desc, grado, grupo, content, filename, items,
     createdAt: new Date().toISOString(), visible: true
   };
   portal.materials.push(material);
+  materialFolderDraft = [];
   _persistLocal();
   renderTeacherContent();
   try{
@@ -2404,10 +2485,28 @@ async function saveMaterial(){
 }
 function renderMaterialList(withActions){
   if(!portal.materials.length) return `<div class="empty"><div class="big">📁</div><p>Aún no hay materiales.</p></div>`;
-  const icons = {link:'🔗',doc:'📄',image:'🖼️',game:'🎮'};
-  const typeLabels = {link:'Enlace',doc:'Documento',image:'Imagen',game:'Juego HTML'};
-  return `<div class="panel"><h3>Materiales cargados (${portal.materials.length})</h3><div class="item-list">${
-    portal.materials.map(m=>`
+  const icons = {link:'🔗',doc:'📄',image:'🖼️',game:'🎮',folder:'📁'};
+  const typeLabels = {link:'Enlace',doc:'Documento',image:'Imagen',game:'Juego HTML',folder:'Carpeta de proyecto'};
+
+  const porGrado = {'1':[], '2':[], '3':[], all:[]};
+  portal.materials.forEach(m=>{ (porGrado[m.grado]||porGrado.all).push(m); });
+  const ordenGrados = [['1','🎓 1° Grado'],['2','🎓 2° Grado'],['3','🎓 3° Grado'],['all','🗂️ Todos los grados']];
+
+  const secciones = ordenGrados.filter(([key])=>porGrado[key].length).map(([key,label])=>{
+    const arr = porGrado[key];
+    return `<details class="tree-grade" open>
+      <summary><span>${label}</span><span class="tree-counter">${arr.length}</span></summary>
+      <div class="tree-grade-body"><div class="item-list">${
+        arr.map(m=>_renderMaterialItem(m, withActions, icons, typeLabels)).join('')
+      }</div></div>
+    </details>`;
+  }).join('');
+
+  return `<div class="panel"><h3>Materiales cargados (${portal.materials.length})</h3>${secciones}</div>`;
+}
+function _renderMaterialItem(m, withActions, icons, typeLabels){
+  const extra = m.type==='folder' ? `<span>${(m.items||[]).length} elemento${(m.items||[]).length===1?'':'s'}</span>` : '';
+  return `
       <div class="item">
         <div class="i-icon">${icons[m.type]||'📎'}</div>
         <div class="i-body">
@@ -2415,7 +2514,7 @@ function renderMaterialList(withActions){
           ${m.desc?`<div style="font-size:.83rem;color:var(--ink2);margin:.15rem 0">${escHtml(m.desc)}</div>`:''}
           <div class="i-meta">
             <span>${typeLabels[m.type]}</span>
-            <span class="pill pill-grado">${m.grado==='all'?'Todos los grados':gradoLabel(m.grado)}</span>
+            ${extra}
             <span class="pill pill-grupo">${m.grupo==='all'?'Todos los grupos':'Grupo '+m.grupo}</span>
             <span class="pill ${m.visible?'pill-on':'pill-off'}">${m.visible?'● Visible':'○ Oculto'}</span>
           </div>
@@ -2425,8 +2524,7 @@ function renderMaterialList(withActions){
           <button class="btn btn-danger btn-small" onclick="delMat('${m.id}')">Eliminar</button>
         </div>`:''}
       </div>
-    `).join('')
-  }</div></div>`;
+    `;
 }
 function toggleMat(id){
   const m = portal.materials.find(x=>x.id===id);
@@ -3373,6 +3471,13 @@ function _listaArchivosPesados(){
     if(m.content && typeof m.content==='string' && m.content.startsWith('data:') && m.content.length>150000){
       out.push({ tipo:'Material', nombre:m.title, size:Math.round(m.content.length*0.75), ref:{kind:'material', id:m.id} });
     }
+    if(m.type==='folder'){
+      (m.items||[]).forEach((it,idx)=>{
+        if(it.content && typeof it.content==='string' && it.content.startsWith('data:') && it.content.length>150000){
+          out.push({ tipo:'Carpeta: '+m.title, nombre: it.name||it.filename||'archivo', size:Math.round(it.content.length*0.75), ref:{kind:'materialFolderItem', materialId:m.id, idx} });
+        }
+      });
+    }
   });
   (portal.activities||[]).forEach(a=>{
     (a.attachments||[]).forEach((at,idx)=>{
@@ -3390,6 +3495,13 @@ function eliminarArchivoPesado(ref){
     portal.materials = portal.materials.filter(m=>m.id!==ref.id);
     _persistLocal();
     removeMaterialFB(ref.id);
+  } else if(ref.kind==='materialFolderItem'){
+    const m = portal.materials.find(x=>x.id===ref.materialId);
+    if(m && Array.isArray(m.items)){
+      m.items.splice(ref.idx,1);
+      _persistLocal();
+      pushMaterialFB(m).catch(()=>{});
+    }
   } else if(ref.kind==='activityAttachment'){
     const a = portal.activities.find(x=>x.id===ref.activityId);
     if(a && Array.isArray(a.attachments)){
@@ -4791,9 +4903,9 @@ function renderStudentContent(){
     c.innerHTML = renderParentGrades(groups);
   } else if(studentTab==='materials'){
     const mine = portal.materials.filter(matchesStudent);
-    const groups = { link:[], doc:[], image:[], game:[] };
+    const groups = { link:[], doc:[], image:[], game:[], folder:[] };
     mine.forEach(m=>{ if(groups[m.type]) groups[m.type].push(m); });
-    const labels = { link:'🔗 Enlaces web', doc:'📄 Documentos', image:'🖼️ Imágenes', game:'🎮 Juegos' };
+    const labels = { link:'🔗 Enlaces web', doc:'📄 Documentos', image:'🖼️ Imágenes', game:'🎮 Juegos', folder:'📁 Carpetas de proyecto' };
     const gradoGrupoInfo = (session.grado && session.grupo) 
       ? `<span class="pill pill-grado">${gradoLabel(session.grado)}</span> <span class="pill pill-grupo">Grupo ${session.grupo}</span>` 
       : `<span style="color:var(--muted)">Grado y grupo no asignados</span>`;
@@ -4805,15 +4917,16 @@ function renderStudentContent(){
     if(!anyShown){
       html += `<div class="empty"><div class="big">📭</div><p>Tu maestro aún no ha publicado materiales para tu grupo.</p></div>`;
     } else {
-      for(const key of ['link','doc','image','game']){
+      for(const key of ['folder','link','doc','image','game']){
         const arr = groups[key];
         if(!arr.length) continue;
+        const icon = key==='link'?'🔗':key==='doc'?'📄':key==='image'?'🖼️':key==='folder'?'📁':'🎮';
         html += `<div class="panel"><h3>${labels[key]}</h3><div class="mat-grid">${
           arr.map(m=>`<div class="mat-card" onclick="openMaterial('${m.id}')">
-            <div class="m-icon">${key==='link'?'🔗':key==='doc'?'📄':key==='image'?'🖼️':'🎮'}</div>
+            <div class="m-icon">${icon}</div>
             <h4>${escHtml(m.title)}</h4>
             <div class="m-desc">${escHtml(m.desc||'')}</div>
-            <span class="m-type">Abrir</span>
+            <span class="m-type">${key==='folder'?`Abrir (${(m.items||[]).length})`:'Abrir'}</span>
           </div>`).join('')
         }</div></div>`;
       }
@@ -5145,7 +5258,57 @@ function openMaterial(id){
   }
   if(m.type==='game'){
     openGameModal(m.title, m.content);
+    return;
   }
+  if(m.type==='folder'){
+    const items = m.items||[];
+    const itemsHtml = items.map((it,i)=>{
+      const icon = it.type==='link' ? '🔗' : _iconForMime(it.mime||it.filename||it.name||'');
+      if(it.type==='link'){
+        return `<a href="${escHtml(it.content)}" target="_blank" rel="noopener" class="item" style="text-decoration:none;color:inherit;cursor:pointer">
+          <div class="i-icon">${icon}</div>
+          <div class="i-body"><div class="i-title" style="font-size:.92rem">${escHtml(it.name||it.content)}</div><div class="i-meta"><span style="color:var(--accent2)">Abrir enlace ↗</span></div></div>
+        </a>`;
+      }
+      if(it.mime && it.mime.startsWith('image/')){
+        return `<div class="item" onclick="openFolderImageItem('${m.id}',${i})" style="cursor:pointer">
+          <div class="i-icon">${icon}</div>
+          <div class="i-body"><div class="i-title" style="font-size:.92rem">${escHtml(it.name||'(imagen)')}</div><div class="i-meta"><span>Clic para ver</span></div></div>
+        </div>`;
+      }
+      return `<div class="item" onclick="downloadFolderItem('${m.id}',${i})" style="cursor:pointer">
+        <div class="i-icon">${icon}</div>
+        <div class="i-body"><div class="i-title" style="font-size:.92rem">${escHtml(it.name||'(archivo)')}</div><div class="i-meta"><span>${it.size?(it.size/1024).toFixed(0)+' KB · ':''}Clic para descargar</span></div></div>
+        <div class="i-actions"><button class="btn btn-blue btn-small">⬇️</button></div>
+      </div>`;
+    }).join('');
+    openModal(`
+      <div class="modal-head"><h3>📁 ${escHtml(m.title)}</h3><span class="modal-close" onclick="closeModal()">×</span></div>
+      <div class="modal-body">
+        ${m.desc?`<p style="color:var(--ink2);margin-bottom:1rem">${escHtml(m.desc)}</p>`:''}
+        <div class="item-list">${itemsHtml||'<p class="sub">Esta carpeta está vacía.</p>'}</div>
+      </div>
+    `);
+  }
+}
+function downloadFolderItem(materialId, idx){
+  const m = portal.materials.find(x=>x.id===materialId);
+  if(!m) return;
+  const it = (m.items||[])[idx];
+  if(!it || !it.content) return;
+  const a = document.createElement('a');
+  a.href = it.content; a.download = it.filename || it.name || 'archivo';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+}
+function openFolderImageItem(materialId, idx){
+  const m = portal.materials.find(x=>x.id===materialId);
+  if(!m) return;
+  const it = (m.items||[])[idx];
+  if(!it) return;
+  openModal(`
+    <div class="modal-head"><h3>${escHtml(it.name||'Imagen')}</h3><span class="modal-close" onclick="closeModal()">×</span></div>
+    <div class="modal-body" style="text-align:center"><img src="${it.content}" style="max-width:100%;border-radius:8px"></div>
+  `, 'img-modal');
 }
 
 function openGameModal(title, htmlContent){
