@@ -618,7 +618,8 @@ let portal = {
   submissions: [],    // [{id,activityId,studentCode,studentName,studentGrado,studentGrupo,files:[{name,content,size,mime}],note,submittedAt,updatedAt}]
   rubricaGlobal: null, // {texto,excelData:{filename,sheets},updatedAt} — rúbrica única, igual para todos los grados y grupos
   aprendizajes: [],    // [{id,grado,trimestre,tema,contenido,actividades,aprendera,orden}] — planificación de aprendizajes subida en Excel (por grado y trimestre)
-  reflexiones: []       // [{id,studentCode,studentName,grado,grupo,trimestre,texto,registrado,registradoAt,revisado,revisadoAt}] — lo que el alumno escribió que aprendió
+  reflexiones: [],      // [{id,studentCode,studentName,grado,grupo,trimestre,texto,registrado,registradoAt,revisado,revisadoAt}] — lo que el alumno escribió que aprendió
+  chatEnabled: true     // si es false, ningún alumno puede entrar al chat (el maestro sí puede seguir viéndolo)
 };
 let session = null;   // {role,label} | null
 
@@ -721,6 +722,7 @@ function loadStore(){
       if(portal.rubricaGlobal === undefined) portal.rubricaGlobal = null;
       if(!portal.aprendizajes) portal.aprendizajes = [];
       if(!portal.reflexiones) portal.reflexiones = [];
+      if(portal.chatEnabled === undefined) portal.chatEnabled = true;
       // Drop offloaded placeholders — Firebase will refill them
       portal.materials = portal.materials.filter(m=>m.content!=='__OFFLOADED__');
       portal.activities = (portal.activities||[]).map(a=>{
@@ -1050,10 +1052,16 @@ function subscribeFirebase(){
       portal.registroAlumnos = v.registroAlumnos || [];
       portal.rubricaGlobal = v.rubricaGlobal || null;
       portal.aprendizajes = v.aprendizajes || [];
+      portal.chatEnabled = v.chatEnabled !== false; // por defecto activado si nunca se ha configurado
       // Only overwrite calif from portal/data if calificaciones/data hasn't pushed yet
       if(v.calif && !portal._califFromRegistro) portal.calif = v.calif;
       _persistLocal();
       suppressSync = false;
+      // Si el chat se acaba de desactivar y un alumno lo tiene abierto en este
+      // momento, lo sacamos del salón de inmediato (no solo al re-renderizar).
+      if(!portal.chatEnabled && session && session.role==='student' && studentTab==='chat' && currentChatRoomId){
+        leaveChatRoom(false);
+      }
       // Migración de una sola vez: si todavía hay materiales/actividades en
       // el formato viejo (arreglo dentro de portal/data) y aún no se movieron
       // al formato nuevo (por elemento), se copian ahora — así no se pierde
@@ -1331,7 +1339,8 @@ function syncToFirebase(immediate){
       calif: portal.calif || null,
       registroAlumnos: portal.registroAlumnos || [],
       rubricaGlobal: portal.rubricaGlobal || null,
-      aprendizajes: portal.aprendizajes || []
+      aprendizajes: portal.aprendizajes || [],
+      chatEnabled: portal.chatEnabled !== false
     };
     const jobs = Object.entries(collections).map(([key, value])=>{
       const size = _approxSize(value);
@@ -1417,6 +1426,7 @@ function forcePublish(){
     registroAlumnos: portal.registroAlumnos || [],
     rubricaGlobal: portal.rubricaGlobal || null,
     aprendizajes: portal.aprendizajes || [],
+    chatEnabled: portal.chatEnabled !== false,
     updatedAt: Date.now()
   }).then(async ()=>{
     const results = await Promise.allSettled([
@@ -1990,18 +2000,39 @@ function renderTeacherContent(){
   else if(teacherTab==='io') c.innerHTML = viewIO();
 }
 
+function toggleChatEnabled(){
+  portal.chatEnabled = !(portal.chatEnabled !== false);
+  _persistLocal();
+  renderTeacherContent();
+  if(fbReady && fbConnected){
+    fbDb.ref('portal/data/chatEnabled').set(portal.chatEnabled).catch(err=>{
+      console.error('Error al guardar chatEnabled', err);
+      toast('Error al sincronizar con Firebase','error');
+    });
+  }
+  toast(portal.chatEnabled ? '✓ Chat activado' : '🚫 Chat desactivado — los alumnos no podrán entrar','success');
+}
+
 function renderTeacherChatTab(c){
   if(!fbReady){ c.innerHTML = `<div class="empty"><div class="big">💬</div><p>Esperando conexión con Firebase…</p></div>`; return; }
+  const enabled = portal.chatEnabled !== false;
+  const toggleHtml = `<div class="panel" style="display:flex;align-items:center;justify-content:space-between;gap:1rem;flex-wrap:wrap">
+    <div>
+      <strong style="font-size:.92rem">${enabled?'💬 Chat activado':'🚫 Chat desactivado'}</strong>
+      <p class="sub" style="margin:.2rem 0 0">${enabled?'Los alumnos pueden entrar al chat de su clase.':'Ningún alumno puede entrar al chat ahora mismo — tú sí puedes seguir usándolo.'}</p>
+    </div>
+    <label class="switch" title="Activar/Desactivar chat para alumnos"><input type="checkbox" ${enabled?'checked':''} onchange="toggleChatEnabled()"><span class="slider"></span></label>
+  </div>`;
   const classes = _distinctClassesPortal();
   if(!classes.length){
-    c.innerHTML = `<div class="empty"><div class="big">💬</div><p>Importa datos de alumnos para poder chatear con una clase.</p></div>`;
+    c.innerHTML = toggleHtml + `<div class="empty"><div class="big">💬</div><p>Importa datos de alumnos para poder chatear con una clase.</p></div>`;
     return;
   }
   if(!teacherChatRoom || !classes.find(cl=>cl.key===teacherChatRoom)) teacherChatRoom = classes[0].key;
   joinChatRoom(_fbSafeKey(teacherChatRoom), 'Maestro', 'teacher', 'maestro');
   const opts = classes.map(cl=>`<option value="${escHtml(cl.key)}" ${cl.key===teacherChatRoom?'selected':''}>${escHtml(cl.key)}</option>`).join('');
   const picker = `<select class="chat-room-select" onchange="changeTeacherChatRoom(this.value)">${opts}</select>`;
-  c.innerHTML = renderChatView(teacherChatRoom, picker);
+  c.innerHTML = toggleHtml + renderChatView(teacherChatRoom, picker);
   renderChatOnlineUI();
   renderChatMessagesUI();
 }
@@ -4878,6 +4909,10 @@ function matchesStudent(item){
 }
 
 function renderStudentChatTab(c){
+  if(portal.chatEnabled===false){
+    c.innerHTML = `<div class="empty"><div class="big">🚫</div><p>El chat está desactivado por ahora. Pregúntale a tu maestro.</p></div>`;
+    return;
+  }
   if(!fbReady){ c.innerHTML = `<div class="empty"><div class="big">💬</div><p>Esperando conexión con Firebase…</p></div>`; return; }
   const classKey = _classKeyForStudent(session.studentId);
   if(!classKey){
