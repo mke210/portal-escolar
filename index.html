@@ -5821,12 +5821,24 @@ function getStudentGroups(){
 function getStudentInGroup(g){
   return (g.students||[]).find(s=>s.qrCode&&_normCode(s.qrCode)===_normCode(session.code));
 }
+// ── Regla de redondeo de la calificación (Registro y Portal deben ser iguales) ──
+// • Menos de 6 → se TRUNCA (5.0 a 5.9 = 5, reprobado).
+// • De 6 en adelante → solo sube si el decimal es MAYOR a .5:
+//   6.5 → 6, 6.6 → 7, 7.5 → 7, 7.6 → 8, 9.6 → 10.
+// El pequeño margen (1e-9) evita errores de punto flotante (ej. 6.4999999 vs 6.5).
+function _califFinal(v){
+  if(v===null||v===undefined||isNaN(v)) return null;
+  v = Number(v);
+  if(v + 1e-9 < 6) return Math.floor(v + 1e-9);
+  const ent = Math.floor(v + 1e-9);
+  return (v - ent > 0.5 + 1e-9) ? ent + 1 : ent;
+}
 function calcAvgForStudent(g,sid){
   // Si el docente capturó un promedio manual en el Registro, ese tiene prioridad
   // (antes este chequeo no existía y por eso el promedio manual no se veía en el Portal)
   if(g.manualAvg && g.manualAvg[sid]!==undefined && g.manualAvg[sid]!==''){
     const m=parseFloat(g.manualAvg[sid]);
-    if(!isNaN(m)) return Math.trunc(m); // truncado, igual que el Registro
+    if(!isNaN(m)) return _califFinal(m); // misma regla que el Registro
   }
   if(!g.activities||!g.grades) return null;
   let sum=0,cnt=0;
@@ -5844,9 +5856,9 @@ function calcAvgForStudent(g,sid){
     }
   });
   // Mismo criterio que el Registro: se divide entre el TOTAL de actividades
-  // (no solo las capturadas) y se TRUNCA a entero (sin aproximar: 5.9 → 5),
-  // igual que calcAvg() del Registro y como pide el IEEPO.
-  return cnt>0?Math.trunc(sum/totalActivities):null;
+  // (no solo las capturadas). Regla de redondeo igual a calcAvg() del Registro:
+  // menos de 6 se trunca (5.9 → 5); de 6 en adelante sube solo si pasa de .5 (6.5 → 6, 6.6 → 7).
+  return cnt>0?_califFinal(sum/totalActivities):null;
 }
 
 function renderParentContent(){
@@ -5983,7 +5995,7 @@ function renderParentGrades(groups){
   gruposMostrar.forEach(g=>{
     const s=getStudentInGroup(g); if(!s) return;
     const avg=calcAvgForStudent(g,s.id);
-    const avgStr=avg!==null?String(Math.trunc(avg)):'—'; // entero, igual que el Registro
+    const avgStr=avg!==null?String(_califFinal(avg)):'—'; // entero, igual que el Registro
     const grado=gradoLabel(g.grado),grupo=grupoLabel(parseGrupoLetter(g.name));
     const trimNum=g.trimestre||'x';
     let avgStyle='background:#f3f4f6;color:#6b7280';
@@ -6134,7 +6146,7 @@ function renderParentSummary(groups){
       const s=getStudentInGroup(g); if(!s) return '<td class="num">—</td>';
       const avg=calcAvgForStudent(g,s.id);
       // Mismo criterio visual que el Registro: número entero por trimestre (sin decimales)
-      return `<td class="num">${_chipCalif(avg!==null?String(Math.trunc(avg)):'')}</td>`;
+      return `<td class="num">${_chipCalif(avg!==null?String(_califFinal(avg)):'')}</td>`;
     }).join('');
     let finalAvg=null;
     const avgs=['1','2','3'].map(t=>{ const g=trims[t]; if(!g) return null; const s=getStudentInGroup(g); if(!s) return null; return calcAvgForStudent(g,s.id); }).filter(x=>x!==null);
