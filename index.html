@@ -5826,7 +5826,7 @@ function calcAvgForStudent(g,sid){
   // (antes este chequeo no existía y por eso el promedio manual no se veía en el Portal)
   if(g.manualAvg && g.manualAvg[sid]!==undefined && g.manualAvg[sid]!==''){
     const m=parseFloat(g.manualAvg[sid]);
-    if(!isNaN(m)) return m;
+    if(!isNaN(m)) return Math.trunc(m); // truncado, igual que el Registro
   }
   if(!g.activities||!g.grades) return null;
   let sum=0,cnt=0;
@@ -5844,8 +5844,9 @@ function calcAvgForStudent(g,sid){
     }
   });
   // Mismo criterio que el Registro: se divide entre el TOTAL de actividades
-  // (no solo las capturadas) y se redondea a entero — igual que calcAvg() en Index.html.
-  return cnt>0?Math.round(sum/totalActivities):null;
+  // (no solo las capturadas) y se TRUNCA a entero (sin aproximar: 5.9 → 5),
+  // igual que calcAvg() del Registro y como pide el IEEPO.
+  return cnt>0?Math.trunc(sum/totalActivities):null;
 }
 
 function renderParentContent(){
@@ -5982,7 +5983,7 @@ function renderParentGrades(groups){
   gruposMostrar.forEach(g=>{
     const s=getStudentInGroup(g); if(!s) return;
     const avg=calcAvgForStudent(g,s.id);
-    const avgStr=avg!==null?avg.toFixed(1):'—';
+    const avgStr=avg!==null?String(Math.trunc(avg)):'—'; // entero, igual que el Registro
     const grado=gradoLabel(g.grado),grupo=grupoLabel(parseGrupoLetter(g.name));
     const trimNum=g.trimestre||'x';
     let avgStyle='background:#f3f4f6;color:#6b7280';
@@ -6133,7 +6134,7 @@ function renderParentSummary(groups){
       const s=getStudentInGroup(g); if(!s) return '<td class="num">—</td>';
       const avg=calcAvgForStudent(g,s.id);
       // Mismo criterio visual que el Registro: número entero por trimestre (sin decimales)
-      return `<td class="num">${_chipCalif(avg!==null?String(Math.round(avg)):'')}</td>`;
+      return `<td class="num">${_chipCalif(avg!==null?String(Math.trunc(avg)):'')}</td>`;
     }).join('');
     let finalAvg=null;
     const avgs=['1','2','3'].map(t=>{ const g=trims[t]; if(!g) return null; const s=getStudentInGroup(g); if(!s) return null; return calcAvgForStudent(g,s.id); }).filter(x=>x!==null);
