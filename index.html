@@ -1063,6 +1063,20 @@ function changeTeacherChatRoom(id){
 }
 
 let _fbSubscribed = false;
+let _califError = null;
+// Línea que dice cuándo se actualizaron por última vez las calificaciones
+// (o el error si el Portal no puede leerlas) — para saber si llegan.
+function _califEstadoHtml(){
+  if(_califError){
+    return `<div class="panel" style="background:#fee2e2;border:1.5px solid #ef4444;color:#991b1b">
+      <strong>⚠️ No se pueden leer las calificaciones del Registro</strong>
+      <p class="sub" style="color:#991b1b;margin:.3rem 0 0">Firebase negó el acceso (${escHtml(String(_califError))}). Se muestran datos guardados anteriormente. El maestro debe revisar las reglas de la base de datos.</p></div>`;
+  }
+  const c = portal.calif;
+  if(!c || !c._registroSavedAt) return '';
+  const d = new Date(c._registroSavedAt);
+  return `<p class="sub" style="text-align:right;margin:.2rem .2rem .6rem;font-size:.75rem">🔄 Calificaciones actualizadas: ${d.toLocaleDateString('es-MX',{day:'2-digit',month:'short'})} ${d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}</p>`;
+}
 function subscribeFirebase(){
   if(!fbReady) return;
   // Firebase vuelve a conectar sola cada vez que regresa el internet; antes
@@ -1153,8 +1167,11 @@ function subscribeFirebase(){
       portal.calif = {
         groups: v.groups,
         importedAt: new Date().toISOString(),
-        _liveSync: true
+        _liveSync: true,
+        _registroSavedAt: v._savedAt || null,
+        _registroSavedBy: v._savedBy || ''
       };
+      _califError = null;
       portal._califFromRegistro = true;
       _persistLocal();
       suppressSync = false;
@@ -1169,6 +1186,18 @@ function subscribeFirebase(){
         }
         else if(session.role==='teacher') renderTeacherContent();
       }
+    }
+  }, err=>{
+    // ANTES no había manejo de error: si Firebase NEGABA la lectura (reglas)
+    // la escucha se cancelaba en silencio y el Portal seguía mostrando las
+    // calificaciones viejas guardadas en el navegador, sin avisar a nadie.
+    _califError = (err && (err.code || err.message)) || 'error';
+    console.error('[Portal] No se pudieron leer las calificaciones del Registro:', err);
+    setConnState('offline', 'Sin permiso para leer calificaciones');
+    if(session){
+      if(session.role==='teacher') renderTeacherContent();
+      else if(session.role==='parent') renderParentContent();
+      else if(session.role==='student') renderStudentContentSafe();
     }
   });
   // Exam results (separate path for atomic pushes)
@@ -2045,7 +2074,7 @@ function setTeacherTab(id){
 
 function renderTeacherContent(){
   const c = document.getElementById('content');
-  if(teacherTab==='calif') c.innerHTML = viewCalif();
+  if(teacherTab==='calif') c.innerHTML = _califEstadoHtml() + viewCalif();
   else if(teacherTab==='materials') c.innerHTML = viewMaterials();
   else if(teacherTab==='activities') c.innerHTML = viewActividadesHub();
   else if(teacherTab==='rubricas') c.innerHTML = viewRubricas();
@@ -5879,12 +5908,12 @@ function calcAvgForStudent(g,sid){
 function renderParentContent(){
   const c=document.getElementById('content');
   const groups=getStudentGroups();
-  if(!groups.length){ c.innerHTML='<div class="empty"><div class="big">📭</div><p>No hay información registrada para este código.</p></div>'; return; }
-  if(parentTab==='grades') c.innerHTML=renderParentGrades(groups);
+  if(!groups.length){ c.innerHTML=_califEstadoHtml()+'<div class="empty"><div class="big">📭</div><p>No hay información registrada para este código.</p></div>'; return; }
+  if(parentTab==='grades') c.innerHTML=_califEstadoHtml()+renderParentGrades(groups);
   else if(parentTab==='tasks') c.innerHTML=renderParentTasks(groups);
   else if(parentTab==='conduct') c.innerHTML=renderParentConduct(groups);
   else if(parentTab==='aprendizaje') c.innerHTML=renderParentAprendizaje();
-  else if(parentTab==='summary') c.innerHTML=renderParentSummary(groups);
+  else if(parentTab==='summary') c.innerHTML=_califEstadoHtml()+renderParentSummary(groups);
 }
 
 /* ── Aprendizajes (rúbrica del maestro + reflexión del alumno, por trimestre) ── */
