@@ -1155,6 +1155,26 @@ function subscribeFirebase(){
   _escucharCalificaciones();
   _subscribeFirebaseResto();
 }
+// Diagnóstico en la consola: con qué identidad entra el Portal a Firebase y
+// qué partes de la base puede leer. Sirve para saber si el bloqueo viene de
+// las reglas, de la sesión o de la configuración del proyecto.
+let _diagHecho = false;
+function _diagnosticoPermisos(){
+  if(_diagHecho) return; _diagHecho = true;
+  const u = fbAuth && fbAuth.currentUser;
+  console.info('[Diagnóstico] SDK:', firebase.SDK_VERSION, '· proyecto:', firebaseConfig.projectId, '· base:', firebaseConfig.databaseURL);
+  if(!u){ console.warn('[Diagnóstico] ❌ NO hay sesión iniciada en el Portal (auth = null)'); }
+  else {
+    console.info('[Diagnóstico] Sesión:', u.isAnonymous ? 'ANÓNIMA' : (u.email||'correo'), '· uid:', u.uid);
+    u.getIdTokenResult().then(t=>{
+      console.info('[Diagnóstico] Token OK · proveedor:', t.signInProvider, '· expira:', t.expirationTime);
+    }).catch(e=>console.warn('[Diagnóstico] ❌ No se pudo obtener el token de sesión:', e.code||e.message));
+  }
+  [['portal/data/chatEnabled','portal'],['calificaciones/data/_savedAt','calificaciones']].forEach(([ruta,nombre])=>{
+    fbDb.ref(ruta).once('value').then(()=>console.info('[Diagnóstico] ✅ Lectura permitida en /'+nombre))
+      .catch(e=>console.warn('[Diagnóstico] ❌ Lectura NEGADA en /'+nombre+':', e.code||e.message));
+  });
+}
 function _escucharCalificaciones(){
   fbDb.ref('calificaciones/data').on('value', snap=>{
     const v = snap.val();
@@ -1198,7 +1218,9 @@ function _escucharCalificaciones(){
     // calificaciones viejas guardadas en el navegador, sin avisar a nadie.
     _califError = (err && (err.code || err.message)) || 'error';
     console.error('[Portal] No se pudieron leer las calificaciones del Registro:', err);
-    setConnState('offline', 'Sin permiso para leer calificaciones');
+    _diagnosticoPermisos();
+    // El Portal SÍ está conectado; solo esta parte está bloqueada.
+    setConnState('online', 'En línea · calificaciones bloqueadas por las reglas');
     if(session){
       if(session.role==='teacher') renderTeacherContent();
       else if(session.role==='parent') renderParentContent();
