@@ -1075,7 +1075,8 @@ function _califEstadoHtml(){
   const c = portal.calif;
   if(!c || !c._registroSavedAt) return '';
   const d = new Date(c._registroSavedAt);
-  return `<p class="sub" style="text-align:right;margin:.2rem .2rem .6rem;font-size:.75rem">🔄 Calificaciones actualizadas: ${d.toLocaleDateString('es-MX',{day:'2-digit',month:'short'})} ${d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}</p>`;
+  const quien = (session && session.role==='teacher' && c._registroSavedBy) ? ` · equipo: ${escHtml(c._registroSavedBy)}` : '';
+  return `<p class="sub" style="text-align:right;margin:.2rem .2rem .6rem;font-size:.75rem">🔄 Calificaciones actualizadas: ${d.toLocaleDateString('es-MX',{day:'2-digit',month:'short'})} ${d.toLocaleTimeString('es-MX',{hour:'2-digit',minute:'2-digit'})}${quien}</p>`;
 }
 function subscribeFirebase(){
   if(!fbReady) return;
