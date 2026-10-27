@@ -721,6 +721,12 @@ function loadStore(){
       if(!portal.aprendizajes) portal.aprendizajes = [];
       if(!portal.reflexiones) portal.reflexiones = [];
       if(portal.chatEnabled === undefined) portal.chatEnabled = true;
+      // Por privacidad, NO se conserva entre recargas la copia de calificaciones:
+      // el maestro la vuelve a recibir al iniciar sesión y cada alumno/padre
+      // descarga solo su propia ficha al escribir su código.
+      portal.calif = null;
+      portal._califFromRegistro = false;
+      portal.registroAlumnos = [];
       // Drop offloaded placeholders — Firebase will refill them
       portal.materials = portal.materials.filter(m=>m.content!=='__OFFLOADED__');
       portal.activities = (portal.activities||[]).map(a=>{
@@ -1095,12 +1101,12 @@ function subscribeFirebase(){
     if(v){
       suppressSync = true;
       portal.exams = v.exams || [];
-      portal.registroAlumnos = v.registroAlumnos || [];
+      portal.registroAlumnos = []; // ya no se usa (ver getAlumnosDesdeCalif)
       portal.rubricaGlobal = v.rubricaGlobal || null;
       portal.aprendizajes = v.aprendizajes || [];
       portal.chatEnabled = v.chatEnabled !== false; // por defecto activado si nunca se ha configurado
       // Only overwrite calif from portal/data if calificaciones/data hasn't pushed yet
-      if(v.calif && !portal._califFromRegistro) portal.calif = v.calif;
+      // portal/data/calif ya NO se usa: lo podía leer cualquiera que abriera el Portal.
       _persistLocal();
       suppressSync = false;
       // Si el chat se acaba de desactivar y un alumno lo tiene abierto en este
@@ -1152,7 +1158,9 @@ function subscribeFirebase(){
     }
   });
   // ── REAL-TIME from Registro de Calificaciones ──
-  _escucharCalificaciones();
+  // calificaciones/data COMPLETO solo lo lee el maestro (sesión con correo).
+  // Alumnos y padres leen únicamente su ficha (ver _entrarConCodigo).
+  if(fbAuth && fbAuth.currentUser && !fbAuth.currentUser.isAnonymous) _escucharCalificaciones();
   _subscribeFirebaseResto();
 }
 // Diagnóstico en la consola: con qué identidad entra el Portal a Firebase y
@@ -1176,7 +1184,9 @@ function _diagnosticoPermisos(){
   });
 }
 function _escucharCalificaciones(){
+  try{ fbDb.ref('calificaciones/data').off('value'); }catch(e){}
   fbDb.ref('calificaciones/data').on('value', snap=>{
+    if(!session || session.role!=='teacher') return;
     const v = snap.val();
     // Firebase puede devolver la lista de grupos como objeto {0:…,1:…} si
     // alguna vez quedó un hueco — antes eso hacía que el Portal IGNORARA
@@ -1230,7 +1240,8 @@ function _escucharCalificaciones(){
     // cada 20 s: en cuanto se corrigen las reglas, el Portal se recupera sin
     // tener que recargar la página.
     clearTimeout(window._califRetry);
-    window._califRetry = setTimeout(()=>{ console.info('[Portal] Reintentando leer calificaciones…'); _escucharCalificaciones(); }, 20000);
+    if(session && session.role==='teacher')
+      window._califRetry = setTimeout(()=>{ console.info('[Portal] Reintentando leer calificaciones…'); _escucharCalificaciones(); }, 20000);
   });
 }
 function _subscribeFirebaseResto(){
@@ -1438,8 +1449,8 @@ function syncToFirebase(immediate){
     // este bloque solo cubre las colecciones que siguen siendo un objeto único.
     const collections = {
       exams: portal.exams || [],
-      calif: portal.calif || null,
-      registroAlumnos: portal.registroAlumnos || [],
+      calif: null,            // se BORRA de portal/data (lo leía cualquiera)
+      registroAlumnos: null,  // idem (contenía nombres y códigos)
       rubricaGlobal: portal.rubricaGlobal || null,
       aprendizajes: portal.aprendizajes || [],
       chatEnabled: portal.chatEnabled !== false
@@ -1524,8 +1535,8 @@ function forcePublish(){
   if(!fbConnected){ toast('Sin conexión a Firebase','error'); return; }
   fbDb.ref('portal/data').update({
     exams: portal.exams || [],
-    calif: portal.calif || null,
-    registroAlumnos: portal.registroAlumnos || [],
+    calif: null,
+    registroAlumnos: null,
     rubricaGlobal: portal.rubricaGlobal || null,
     aprendizajes: portal.aprendizajes || [],
     chatEnabled: portal.chatEnabled !== false,
@@ -1651,6 +1662,10 @@ function loginTeacher(){
     err.textContent = '';
     session = {role:'teacher', label:'Maestro admin'};
     showApp();
+    if(fbDb) _escucharCalificaciones();
+    // Limpieza única: borrar copias viejas de calificaciones y códigos que
+    // quedaron dentro de portal/data (las podía leer cualquiera).
+    if(fbDb) fbDb.ref('portal/data').update({ calif:null, registroAlumnos:null }).catch(()=>{});
   }).catch(e=>{
     teacherLoggingIn = false;
     const c = (e && e.code) || '';
@@ -1691,63 +1706,84 @@ function countStudentsWithCode(){
   return { total: seen.size, withCode: seenWithCode.size };
 }
 
-function loginStudent(){
-  const code = document.getElementById('sCode').value.trim();
-  if(!code){ document.getElementById('sErr').textContent = 'Escribe tu código'; return; }
-  if(!portal.calif || !portal.calif.groups){
-    document.getElementById('sErr').textContent = 'El maestro aún no ha cargado datos';
-    return;
-  }
-  const match = findStudentByCode(code);
-  if(!match){
-    const st = countStudentsWithCode();
-    let msg = `Código "${code}" no encontrado.`;
-    if(st.withCode===0) msg += ` Ningún alumno tiene código asignado aún (pídele a tu maestro).`;
-    else msg += ` Hay ${st.withCode} de ${st.total} alumnos con código. Revisa mayúsculas y espacios.`;
-    document.getElementById('sErr').textContent = msg;
-    return;
-  }
-  
-  // Grado y grupo REALES del alumno — si el Registro guardó su grado/grupo
-  // propio (necesario en clases combinadas, ej. "1° ABC") se usa ese; si no,
-  // se cae de vuelta al grado/grupo del grupo de calificaciones. Mismo
-  // criterio que el Registro, así que ambas apps siempre concuerdan.
-  const grado = _alumnoGradoPortal(match.student, match.group);
-  const grupo = _alumnoGrupoPortal(match.student, match.group);
-  
-  session = { role:'student', code, label:match.student.name,
-              grado: grado,
-              grupo: grupo,
-              studentId: match.student.id };
-  showApp();
+// ── Entrada de alumnos y padres por código ──
+// Ya no se descarga la lista completa de calificaciones: se pide a Firebase
+// SOLO la ficha del código escrito (fichas/{CÓDIGO}). Si el código no existe
+// Firebase no devuelve nada, y las reglas impiden listar las demás fichas.
+function _fichaKey(code){ return String(code||'').trim().toUpperCase().replace(/\s+/g,'').replace(/[.#$\[\]\/]/g,'_'); }
+let _fichaRef = null;
+function _arr(x){ return Array.isArray(x) ? x : (x && typeof x==='object' ? Object.values(x) : []); }
+function _aplicarFicha(f){
+  const groups = _arr(f.groups).filter(Boolean).map(g=>{
+    g.students = _arr(g.students).filter(Boolean);
+    g.activities = _arr(g.activities).filter(Boolean);
+    return g;
+  });
+  portal.calif = { groups, importedAt: new Date().toISOString(), _liveSync: true,
+                   _registroSavedAt: f._savedAt || null, _registroSavedBy: '' };
+  portal._califFromRegistro = true;
+  _califError = null;
+  _persistLocal();
 }
-
-function loginParent(){
-  const code = document.getElementById('pCode').value.trim();
-  if(!code){ document.getElementById('pErr').textContent = 'Escribe el código de tu hijo'; return; }
-  if(!portal.calif || !portal.calif.groups){
-    document.getElementById('pErr').textContent = 'El maestro aún no ha cargado datos';
-    return;
-  }
-  const match = findStudentByCode(code);
-  if(!match){
-    const st = countStudentsWithCode();
-    let msg = `Código "${code}" no encontrado.`;
-    if(st.withCode===0) msg += ` Ningún alumno tiene código. Pídele al maestro que asigne uno.`;
-    else msg += ` Hay ${st.withCode} de ${st.total} alumnos con código. Revisa mayúsculas y espacios.`;
-    document.getElementById('pErr').textContent = msg;
-    return;
-  }
-  
-  // Grado y grupo REALES del alumno (ver nota en loginStudent).
-  const grado = _alumnoGradoPortal(match.student, match.group);
-  const grupo = _alumnoGrupoPortal(match.student, match.group);
-  
-  session = { role:'parent', code, label:'Padre de '+match.student.name,
-              studentName:match.student.name, studentId:match.student.id,
-              grado: grado, grupo: grupo };
-  showApp();
+function _esperarSesionFirebase(maxMs){
+  return new Promise((resolve, reject)=>{
+    const t0 = Date.now();
+    (function check(){
+      if(fbReady && fbDb && fbAuth && fbAuth.currentUser) return resolve();
+      if(Date.now()-t0 > (maxMs||12000)) return reject(new Error('Sin conexión con Firebase. Revisa tu internet e intenta de nuevo.'));
+      setTimeout(check, 250);
+    })();
+  });
 }
+function _entrarConCodigo(role, inputId, errId){
+  const code = document.getElementById(inputId).value.trim();
+  const errEl = document.getElementById(errId);
+  if(!code){ errEl.textContent = role==='parent' ? 'Escribe el código de tu hijo' : 'Escribe tu código'; return; }
+  const key = _fichaKey(code);
+  errEl.textContent = 'Verificando código…';
+  _esperarSesionFirebase().then(()=>fbDb.ref('fichas/'+key).once('value')).then(snap=>{
+    const f = snap.val();
+    if(!f || !f.groups){
+      errEl.textContent = `Código "${code}" no encontrado. Revisa mayúsculas y espacios, o pídele tu código al maestro.`;
+      return;
+    }
+    _aplicarFicha(f);
+    const match = findStudentByCode(code);
+    if(!match){ errEl.textContent = `Código "${code}" no encontrado.`; return; }
+    errEl.textContent = '';
+    // Grado y grupo REALES del alumno — si el Registro guardó su grado/grupo
+    // propio (clases combinadas, ej. "1° ABC") se usa ese; si no, el del grupo.
+    const grado = _alumnoGradoPortal(match.student, match.group);
+    const grupo = _alumnoGrupoPortal(match.student, match.group);
+    if(role==='student'){
+      session = { role:'student', code, label:match.student.name, grado, grupo, studentId: match.student.id };
+    } else {
+      session = { role:'parent', code, label:'Padre de '+match.student.name,
+                  studentName:match.student.name, studentId:match.student.id, grado, grupo };
+    }
+    showApp();
+    // Actualización EN VIVO de la ficha (cuando el maestro guarda en el Registro)
+    if(_fichaRef){ try{ _fichaRef.off('value'); }catch(e){} }
+    _fichaRef = fbDb.ref('fichas/'+key);
+    let primera = true;
+    _fichaRef.on('value', sn=>{
+      if(primera){ primera = false; return; } // la primera lectura ya se aplicó
+      const nf = sn.val();
+      if(!nf || !session || session.role==='teacher' || _fichaKey(session.code)!==key) return;
+      _aplicarFicha(nf);
+      if(session.role==='parent'){ renderParentContent(); flashUpdate(); }
+      else if(session.role==='student'){ renderStudentContentSafe(); if(!currentExam) flashUpdate(); }
+    }, err=>{
+      _califError = (err && (err.code||err.message)) || 'error';
+      console.error('[Portal] No se pudo leer la ficha del alumno:', err);
+    });
+  }).catch(e=>{
+    console.error('[Portal] Error al verificar código:', e);
+    errEl.textContent = 'No se pudo verificar el código: ' + ((e && (e.code||e.message)) || 'error de conexión');
+  });
+}
+function loginStudent(){ _entrarConCodigo('student', 'sCode', 'sErr'); }
+function loginParent(){ _entrarConCodigo('parent', 'pCode', 'pErr'); }
 
 /* ═══════════════════════════════════════════
    🎨 PERSONALIZACIÓN DEL ALUMNO
@@ -2029,6 +2065,12 @@ function renderStudentPersonalizar(){
 function logout(){
   leaveChatRoom(true); // borra todo el chat de la clase al cerrar sesión
   if(session && session.role==='teacher' && fbAuth){ fbAuth.signOut().catch(()=>{}); } // vuelve a sesión anónima solo
+  // No dejar en este navegador datos de calificaciones al salir
+  try{ if(fbDb) fbDb.ref('calificaciones/data').off('value'); }catch(e){}
+  clearTimeout(window._califRetry);
+  if(_fichaRef){ try{ _fichaRef.off('value'); }catch(e){} _fichaRef = null; }
+  portal.calif = null; portal._califFromRegistro = false; _califError = null;
+  _persistLocal();
   detenerParticulasFlotantes();
   detenerFondoMatrix();
   document.body.classList.remove('fondo-activo');
