@@ -1062,8 +1062,15 @@ function changeTeacherChatRoom(id){
   renderTeacherContent();
 }
 
+let _fbSubscribed = false;
 function subscribeFirebase(){
   if(!fbReady) return;
+  // Firebase vuelve a conectar sola cada vez que regresa el internet; antes
+  // cada reconexión registraba OTRA copia de todas las escuchas (se duplicaban
+  // y la página se volvía lenta). Con una sola vez basta: Firebase las
+  // mantiene activas y se ponen al día solas al reconectar.
+  if(_fbSubscribed) return;
+  _fbSubscribed = true;
   // Teacher data (exams, calif, registroAlumnos, rúbrica, aprendizajes)
   // Materiales y actividades ya NO viven aquí — cada uno se guarda y se
   // borra individualmente (ver más abajo) para que un archivo pesado nunca
@@ -1132,7 +1139,15 @@ function subscribeFirebase(){
   // ── REAL-TIME from Registro de Calificaciones ──
   fbDb.ref('calificaciones/data').on('value', snap=>{
     const v = snap.val();
+    // Firebase puede devolver la lista de grupos como objeto {0:…,1:…} si
+    // alguna vez quedó un hueco — antes eso hacía que el Portal IGNORARA
+    // todas las calificaciones nuevas y siguiera mostrando las viejas.
+    if(v && v.groups && !Array.isArray(v.groups) && typeof v.groups==='object') v.groups = Object.values(v.groups).filter(Boolean);
     if(v && v.groups && Array.isArray(v.groups)){
+      v.groups.forEach(g=>{
+        if(g && g.students && !Array.isArray(g.students)) g.students = Object.values(g.students).filter(Boolean);
+        if(g && g.activities && !Array.isArray(g.activities)) g.activities = Object.values(g.activities).filter(Boolean);
+      });
       const isFirstLoad = !portal.calif;
       suppressSync = true;
       portal.calif = {
