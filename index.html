@@ -1152,6 +1152,10 @@ function subscribeFirebase(){
     }
   });
   // ── REAL-TIME from Registro de Calificaciones ──
+  _escucharCalificaciones();
+  _subscribeFirebaseResto();
+}
+function _escucharCalificaciones(){
   fbDb.ref('calificaciones/data').on('value', snap=>{
     const v = snap.val();
     // Firebase puede devolver la lista de grupos como objeto {0:…,1:…} si
@@ -1200,7 +1204,14 @@ function subscribeFirebase(){
       else if(session.role==='parent') renderParentContent();
       else if(session.role==='student') renderStudentContentSafe();
     }
+    // Firebase cancela la escucha cuando niega el permiso. Se reintenta sola
+    // cada 20 s: en cuanto se corrigen las reglas, el Portal se recupera sin
+    // tener que recargar la página.
+    clearTimeout(window._califRetry);
+    window._califRetry = setTimeout(()=>{ console.info('[Portal] Reintentando leer calificaciones…'); _escucharCalificaciones(); }, 20000);
   });
+}
+function _subscribeFirebaseResto(){
   // Exam results (separate path for atomic pushes)
   fbDb.ref('portal/results').on('value', snap=>{
     const v = snap.val();
