@@ -5177,9 +5177,9 @@ function renderStudentActivityCard(a){
       <div class="i-icon">${icon}</div>
       <div class="i-body">
         <div class="i-title" style="font-size:.92rem">${escHtml(att.name||att.filename||'(archivo)')}</div>
-        <div class="i-meta"><span>${att.size?(att.size/1024).toFixed(0)+' KB · ':''}Clic para descargar</span></div>
+        <div class="i-meta"><span>${att.size?(att.size/1024).toFixed(0)+' KB · ':''}${_esImagen(att.mime, att.filename||att.name, '') ? 'Clic para ver' : 'Clic para descargar'}</span></div>
       </div>
-      <div class="i-actions"><button class="btn btn-blue btn-small">⬇️</button></div>
+      <div class="i-actions"><button class="btn btn-blue btn-small">${_esImagen(att.mime, att.filename||att.name, '') ? '👁️' : '⬇️'}</button></div>
     </div>`;
   }).join('');
 
@@ -5262,16 +5262,62 @@ function renderStudentActivityCard(a){
   </div>`;
 }
 
+// ── Abrir archivos del maestro (imágenes, documentos) de forma confiable ──
+// Antes las imágenes adjuntas a una ACTIVIDAD solo se podían "descargar", y la
+// descarga de un archivo guardado como texto (data:…) falla sin aviso en
+// muchos celulares: el alumno tocaba y no pasaba nada. Ahora:
+//   • las imágenes se MUESTRAN en pantalla (con botón para descargar), y
+//   • los demás archivos se descargan convirtiéndolos primero a un archivo real (Blob).
+function _esImagen(mime, nombre, content){
+  const m = String(mime||''), n = String(nombre||'').toLowerCase(), c = String(content||'');
+  return m.startsWith('image/') || /^data:image\//.test(c) || /\.(png|jpe?g|gif|webp|bmp|svg)$/.test(n);
+}
+function _archivoNoDisponible(content){
+  return !content || content === '__OFFLOADED__' || typeof content !== 'string';
+}
+function _dataUrlABlobUrl(dataUrl){
+  try{
+    const m = /^data:([^;,]*)(;base64)?,(.*)$/s.exec(dataUrl);
+    if(!m) return dataUrl;
+    const mime = m[1] || 'application/octet-stream';
+    let bytes;
+    if(m[2]){ const bin = atob(m[3]); bytes = new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) bytes[i] = bin.charCodeAt(i); }
+    else bytes = new TextEncoder().encode(decodeURIComponent(m[3]));
+    return URL.createObjectURL(new Blob([bytes], { type: mime }));
+  }catch(e){ console.warn('[Archivo] no se pudo convertir', e); return dataUrl; }
+}
+function _descargarArchivo(content, nombre){
+  if(_archivoNoDisponible(content)){ toast('⚠️ Este archivo no está disponible en la nube. Pídele al maestro que lo vuelva a subir.','error'); return; }
+  const url = /^data:/.test(content) ? _dataUrlABlobUrl(content) : content;
+  const a = document.createElement('a');
+  a.href = url; a.download = nombre || 'archivo'; a.rel = 'noopener';
+  if(!/^data:|^blob:/.test(url)) a.target = '_blank';
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  if(/^blob:/.test(url)) setTimeout(()=>URL.revokeObjectURL(url), 60000);
+}
+let _imgDescarga = null;
+function _verImagen(titulo, content, nombre){
+  if(_archivoNoDisponible(content)){ toast('⚠️ Esta imagen no está disponible en la nube. Pídele al maestro que la vuelva a subir.','error'); return; }
+  _imgDescarga = { content, nombre: nombre || titulo || 'imagen' };
+  openModal(`
+    <div class="modal-head"><h3>${escHtml(titulo||'Imagen')}</h3><span class="modal-close" onclick="closeModal()">×</span></div>
+    <div class="modal-body" style="text-align:center">
+      <img src="${content}" alt="${escHtml(titulo||'Imagen')}" style="max-width:100%;max-height:75vh;border-radius:8px"
+        onerror="this.outerHTML='<p style=&quot;color:#991b1b&quot;>⚠️ No se pudo mostrar la imagen (el archivo está dañado o incompleto). Pídele al maestro que la vuelva a subir.</p>'">
+      <div class="btn-row" style="justify-content:center;margin-top:.8rem"><button class="btn btn-blue" onclick="_descargarArchivo(_imgDescarga.content,_imgDescarga.nombre)">⬇️ Descargar imagen</button></div>
+    </div>
+  `, 'img-modal');
+}
+
 function downloadActivityAttachment(actId, idx){
   const a = portal.activities.find(x=>x.id===actId);
   if(!a) return;
   const att = (a.attachments||[])[idx];
   if(!att) return;
   if(att.type==='link'){ window.open(att.content,'_blank'); return; }
-  const link = document.createElement('a');
-  link.href = att.content;
-  link.download = att.filename || att.name || 'archivo';
-  document.body.appendChild(link); link.click(); document.body.removeChild(link);
+  const nombre = att.filename || att.name || 'archivo';
+  if(_esImagen(att.mime, nombre, att.content)){ _verImagen(att.name || nombre, att.content, nombre); return; }
+  _descargarArchivo(att.content, nombre);
 }
 
 async function submitActivity(actId){
@@ -5395,16 +5441,12 @@ function openMaterial(id){
   if(!m) return;
   if(m.type==='link'){ window.open(m.content, '_blank'); return; }
   if(m.type==='doc'){
-    const a = document.createElement('a');
-    a.href = m.content; a.download = m.filename || m.title;
-    a.click();
+    if(_esImagen(m.mime, m.filename, m.content)){ _verImagen(m.title, m.content, m.filename || m.title); return; }
+    _descargarArchivo(m.content, m.filename || m.title);
     return;
   }
   if(m.type==='image'){
-    openModal(`
-      <div class="modal-head"><h3>${escHtml(m.title)}</h3><span class="modal-close" onclick="closeModal()">×</span></div>
-      <div class="modal-body" style="text-align:center"><img src="${m.content}" style="max-width:100%;border-radius:8px"></div>
-    `);
+    _verImagen(m.title, m.content, m.filename || m.title);
     return;
   }
   if(m.type==='game'){
@@ -5446,20 +5488,17 @@ function downloadFolderItem(materialId, idx){
   const m = portal.materials.find(x=>x.id===materialId);
   if(!m) return;
   const it = (m.items||[])[idx];
-  if(!it || !it.content) return;
-  const a = document.createElement('a');
-  a.href = it.content; a.download = it.filename || it.name || 'archivo';
-  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  if(!it) return;
+  const nombre = it.filename || it.name || 'archivo';
+  if(_esImagen(it.mime, nombre, it.content)){ _verImagen(it.name || nombre, it.content, nombre); return; }
+  _descargarArchivo(it.content, nombre);
 }
 function openFolderImageItem(materialId, idx){
   const m = portal.materials.find(x=>x.id===materialId);
   if(!m) return;
   const it = (m.items||[])[idx];
   if(!it) return;
-  openModal(`
-    <div class="modal-head"><h3>${escHtml(it.name||'Imagen')}</h3><span class="modal-close" onclick="closeModal()">×</span></div>
-    <div class="modal-body" style="text-align:center"><img src="${it.content}" style="max-width:100%;border-radius:8px"></div>
-  `, 'img-modal');
+  _verImagen(it.name || 'Imagen', it.content, it.filename || it.name);
 }
 
 function openGameModal(title, htmlContent){
